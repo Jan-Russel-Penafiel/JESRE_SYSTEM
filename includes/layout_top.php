@@ -18,6 +18,11 @@ $navClass = static function (bool $active): string {
 
     return 'text-slate-200 border border-transparent hover:bg-white/10 hover:border-white/20';
 };
+
+$tailwindCssFile = __DIR__ . '/../assets/css/tailwind.css';
+$tailwindCssVersion = is_file($tailwindCssFile) ? (string) filemtime($tailwindCssFile) : '1';
+$fontCssFile = __DIR__ . '/../assets/css/fonts.css';
+$fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1';
 ?>
 <!doctype html>
 <html lang="en">
@@ -25,28 +30,9 @@ $navClass = static function (bool $active): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(APP_NAME) ?></title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="assets/css/fonts.css?v=<?= e($fontCssVersion) ?>">
+    <link rel="stylesheet" href="assets/css/tailwind.css?v=<?= e($tailwindCssVersion) ?>">
     <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        brand: {
-                            50: '#f3f8f8',
-                            100: '#dbeceb',
-                            300: '#93c5c3',
-                            500: '#438d89',
-                            700: '#2f6461',
-                            900: '#1f4442'
-                        }
-                    }
-                }
-            }
-        };
-
         function openModal(id) {
             const element = document.getElementById(id);
             if (!element) {

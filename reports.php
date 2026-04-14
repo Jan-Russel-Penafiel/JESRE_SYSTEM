@@ -114,6 +114,9 @@ $pdfPayload = [
     ],
 ];
 
+$jsPdfFile = __DIR__ . '/assets/vendor/jspdf/jspdf.umd.min.js';
+$jsPdfVersion = is_file($jsPdfFile) ? (string) filemtime($jsPdfFile) : '1';
+
 $pageTitle = 'Summary Reports';
 $activePage = 'reports';
 require_once __DIR__ . '/includes/layout_top.php';
@@ -297,7 +300,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     </article>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="assets/vendor/jspdf/jspdf.umd.min.js?v=<?= e($jsPdfVersion) ?>"></script>
 <script>
     const reportPayload = <?= json_encode($pdfPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 

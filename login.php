@@ -29,6 +29,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Invalid login credentials.';
     }
 }
+
+$tailwindCssFile = __DIR__ . '/assets/css/tailwind.css';
+$tailwindCssVersion = is_file($tailwindCssFile) ? (string) filemtime($tailwindCssFile) : '1';
+$fontCssFile = __DIR__ . '/assets/css/fonts.css';
+$fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1';
 ?>
 <!doctype html>
 <html lang="en">
@@ -36,10 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Login | <?= e(APP_NAME) ?></title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="assets/css/fonts.css?v=<?= e($fontCssVersion) ?>">
+    <link rel="stylesheet" href="assets/css/tailwind.css?v=<?= e($tailwindCssVersion) ?>">
     <style>
         :root {
             --login-page-pad: 0.75rem;

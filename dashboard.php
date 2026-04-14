@@ -99,6 +99,9 @@ $topBeverages = $pdo->query("SELECT beverage_name, SUM(quantity) AS total_quanti
     LIMIT 6")
     ->fetchAll();
 
+$chartJsFile = __DIR__ . '/assets/vendor/chartjs/chart.umd.js';
+$chartJsVersion = is_file($chartJsFile) ? (string) filemtime($chartJsFile) : '1';
+
 $pageTitle = 'Central Dashboard';
 $activePage = 'dashboard';
 require_once __DIR__ . '/includes/layout_top.php';
@@ -273,7 +276,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     </section>
 <?php endif; ?>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="assets/vendor/chartjs/chart.umd.js?v=<?= e($chartJsVersion) ?>"></script>
 <script>
     (function () {
         const canvas = document.getElementById('dashboardStatsChart');
