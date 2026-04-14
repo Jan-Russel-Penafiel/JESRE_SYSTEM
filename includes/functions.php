@@ -1,0 +1,288 @@
+<?php
+declare(strict_types=1);
+
+function e($value): string
+{
+    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+}
+
+function set_flash(string $type, string $message): void
+{
+    $_SESSION['flashes'][] = [
+        'type' => $type,
+        'message' => $message,
+    ];
+}
+
+function consume_flashes(): array
+{
+    $flashes = $_SESSION['flashes'] ?? [];
+    unset($_SESSION['flashes']);
+
+    return $flashes;
+}
+
+function redirect(string $path): void
+{
+    header('Location: ' . $path);
+    exit;
+}
+
+function departments(): array
+{
+    global $DEPARTMENTS;
+
+    return $DEPARTMENTS;
+}
+
+function department_configs(): array
+{
+    global $DEPARTMENT_CONFIG;
+
+    return $DEPARTMENT_CONFIG;
+}
+
+function department_config(string $departmentKey): ?array
+{
+    $configs = department_configs();
+
+    return $configs[$departmentKey] ?? null;
+}
+
+function department_table(string $departmentKey): ?string
+{
+    $config = department_config($departmentKey);
+
+    return $config['table'] ?? null;
+}
+
+function department_label(string $departmentKey): string
+{
+    $list = departments();
+
+    return $list[$departmentKey] ?? ucfirst($departmentKey);
+}
+
+function department_short_label(string $departmentKey): string
+{
+    return trim(str_replace(' Department', '', department_label($departmentKey)));
+}
+
+function can_user_access_department(array $user, string $departmentKey): bool
+{
+    if (($user['role'] ?? null) === ROLE_GENERAL_MANAGER) {
+        return !in_array($departmentKey, ['inventory', 'production', 'sales', 'accounting', 'crm', 'marketing'], true);
+    }
+
+    return ($user['role'] ?? null) === ROLE_DEPARTMENT_HEAD && ($user['department'] ?? '') === $departmentKey;
+}
+
+function status_badge_class(string $status): string
+{
+    if ($status === 'approved') {
+        return 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+    }
+
+    if ($status === 'rejected') {
+        return 'bg-rose-100 text-rose-700 border border-rose-300';
+    }
+
+    return 'bg-amber-100 text-amber-700 border border-amber-300';
+}
+
+function format_money($value): string
+{
+    return 'PHP ' . number_format((float) $value, 2);
+}
+
+function format_table_value(string $column, $value): string
+{
+    if ($value === null || $value === '') {
+        return '-';
+    }
+
+    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'amount', 'total_amount', 'total_spent'], true)) {
+        return number_format((float) $value, 2);
+    }
+
+    if (in_array($column, ['created_at', 'updated_at', 'approved_at', 'last_purchase_at'], true)) {
+        $timestamp = strtotime((string) $value);
+
+        return $timestamp ? date('M d, Y h:i A', $timestamp) : (string) $value;
+    }
+
+    if (in_array($column, ['start_date', 'end_date'], true)) {
+        $timestamp = strtotime((string) $value);
+
+        return $timestamp ? date('M d, Y', $timestamp) : (string) $value;
+    }
+
+    return (string) $value;
+}
+
+function next_order_code(PDO $pdo): string
+{
+    $prefix = 'DM' . date('Ymd');
+    $stmt = $pdo->query("SELECT COUNT(*) AS total FROM sales_orders WHERE DATE(created_at) = CURDATE()");
+    $row = $stmt->fetch();
+    $sequence = ((int) ($row['total'] ?? 0)) + 1;
+
+    return $prefix . '-' . str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+}
+
+function validate_department_input(array $departmentConfig, array $source): array
+{
+    $data = [];
+    $errors = [];
+
+    foreach ($departmentConfig['fields'] as $field) {
+        $name = $field['name'];
+        $type = $field['type'];
+        $required = (bool) ($field['required'] ?? false);
+        $raw = $source[$name] ?? '';
+
+        if (is_string($raw)) {
+            $raw = trim($raw);
+        }
+
+        if ($type === 'number') {
+            if ($raw === '' && !$required) {
+                $data[$name] = null;
+                continue;
+            }
+
+            if (!is_numeric((string) $raw)) {
+                $errors[] = $field['label'] . ' must be a valid number.';
+                continue;
+            }
+
+            $data[$name] = (float) $raw;
+            continue;
+        }
+
+        if ($type === 'inventory_select') {
+            if ($raw === '' && !$required) {
+                $data[$name] = null;
+                continue;
+            }
+
+            if (!ctype_digit((string) $raw)) {
+                $errors[] = $field['label'] . ' is invalid.';
+                continue;
+            }
+
+            $data[$name] = (int) $raw;
+            continue;
+        }
+
+        if ($required && $raw === '') {
+            $errors[] = $field['label'] . ' is required.';
+            continue;
+        }
+
+        $data[$name] = $raw === '' ? null : (string) $raw;
+    }
+
+    return [$data, $errors];
+}
+
+function query_with(array $base, array $changes = [], array $remove = []): string
+{
+    $query = $base;
+
+    foreach ($changes as $key => $value) {
+        $query[$key] = $value;
+    }
+
+    foreach ($remove as $key) {
+        unset($query[$key]);
+    }
+
+    return http_build_query($query);
+}
+
+function normalize_audit_snapshot(?array $snapshot): ?array
+{
+    if ($snapshot === null) {
+        return null;
+    }
+
+    $normalized = [];
+
+    foreach ($snapshot as $key => $value) {
+        if (is_resource($value)) {
+            continue;
+        }
+
+        if (is_object($value)) {
+            $normalized[$key] = (string) $value;
+            continue;
+        }
+
+        $normalized[$key] = $value;
+    }
+
+    ksort($normalized);
+
+    return $normalized;
+}
+
+function build_audit_diff(?array $oldData, ?array $newData): array
+{
+    $old = $oldData ?? [];
+    $new = $newData ?? [];
+    $keys = array_values(array_unique(array_merge(array_keys($old), array_keys($new))));
+    sort($keys);
+
+    $diff = [];
+
+    foreach ($keys as $key) {
+        $oldValue = $old[$key] ?? null;
+        $newValue = $new[$key] ?? null;
+
+        if ($oldValue === $newValue) {
+            continue;
+        }
+
+        $diff[$key] = [
+            'old' => $oldValue,
+            'new' => $newValue,
+        ];
+    }
+
+    return $diff;
+}
+
+function write_audit_log(
+    PDO $pdo,
+    string $module,
+    string $tableName,
+    int $recordId,
+    string $actionType,
+    ?array $oldData,
+    ?array $newData,
+    ?int $performedBy,
+    ?string $note = null,
+    string $source = 'user'
+): void {
+    $normalizedOld = normalize_audit_snapshot($oldData);
+    $normalizedNew = normalize_audit_snapshot($newData);
+    $diff = build_audit_diff($normalizedOld, $normalizedNew);
+
+    $stmt = $pdo->prepare('INSERT INTO audit_trails
+        (module, table_name, record_id, action_type, source, note, old_data, new_data, diff_data, performed_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+
+    $stmt->execute([
+        $module,
+        $tableName,
+        $recordId,
+        $actionType,
+        $source,
+        $note,
+        $normalizedOld === null ? null : json_encode($normalizedOld, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        $normalizedNew === null ? null : json_encode($normalizedNew, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        empty($diff) ? null : json_encode($diff, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        $performedBy,
+    ]);
+}
