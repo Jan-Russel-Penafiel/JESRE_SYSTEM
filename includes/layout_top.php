@@ -9,6 +9,10 @@ if (!isset($activePage)) {
     $activePage = 'dashboard';
 }
 
+if (!isset($pageTitleActionHtml)) {
+    $pageTitleActionHtml = '';
+}
+
 $user = current_user();
 
 $navClass = static function (bool $active): string {
@@ -189,6 +193,9 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             --canvas: #eef2f2;
             --text-main: #0f172a;
 
+            --app-sidebar-md: 13.5rem;
+            --app-sidebar-lg: 14.5rem;
+
             --app-content-x: 0.75rem;
             --app-content-y: 0.75rem;
             --app-card-pad: 1rem;
@@ -217,6 +224,10 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             box-sizing: border-box;
         }
 
+        html {
+            font-size: 14px;
+        }
+
         body {
             font-family: 'Manrope', sans-serif;
             background: radial-gradient(circle at 10% 10%, #d8eceb 0%, transparent 30%), radial-gradient(circle at 90% 90%, #fde8cf 0%, transparent 35%), var(--canvas);
@@ -224,6 +235,34 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             margin: 0;
             min-width: 320px;
             overflow-x: hidden;
+        }
+
+        .app-sidebar {
+            width: 100%;
+        }
+
+        .app-main {
+            min-width: 0;
+        }
+
+        @media (min-width: 768px) {
+            .app-sidebar {
+                width: var(--app-sidebar-md);
+            }
+
+            .app-main {
+                margin-left: var(--app-sidebar-md);
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .app-sidebar {
+                width: var(--app-sidebar-lg);
+            }
+
+            .app-main {
+                margin-left: var(--app-sidebar-lg);
+            }
         }
 
         .app-content-wrap {
@@ -234,9 +273,47 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             padding: var(--app-card-pad) !important;
         }
 
+        .app-page-title-wrap {
+            margin: 0 0 0.9rem;
+            padding: 0.1rem 0.15rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .app-page-title-main {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            min-width: 0;
+        }
+
         .app-page-title {
-            font-size: var(--app-title-size);
-            line-height: var(--app-title-line);
+            font-size: 18px;
+            line-height: 1.2;
+            font-weight: 800;
+            font-style: italic;
+            letter-spacing: 0.01em;
+            margin: 0;
+        }
+
+        .app-page-title-accent {
+            display: inline-block;
+            width: 2.8rem;
+            height: 2px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #0f172a 0%, #94a3b8 100%);
+            opacity: 0.75;
+        }
+
+        .app-page-title-action {
+            margin-left: auto;
+        }
+
+        .app-title-action-btn {
+            white-space: nowrap;
         }
 
         .app-mobile-topbar {
@@ -265,6 +342,25 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
         }
 
         @media (max-width: 639px) {
+            .app-page-title-wrap {
+                margin-bottom: 0.75rem;
+                gap: 0.5rem;
+            }
+
+            .app-page-title-accent {
+                width: 2.2rem;
+            }
+
+            .app-page-title-action {
+                width: 100%;
+                margin-left: 0;
+            }
+
+            .app-title-action-btn {
+                width: 100%;
+                text-align: center;
+            }
+
             .table-scroll {
                 overflow-x: visible;
                 margin-inline: var(--table-scroll-edge);
@@ -542,7 +638,7 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
 </head>
 <body>
 <div class="min-h-screen flex w-full overflow-x-hidden">
-    <aside class="hidden md:flex md:fixed md:inset-y-0 md:left-0 md:w-64 lg:w-72 md:flex-col md:overflow-y-auto bg-slate-900 text-slate-100 p-4 lg:p-5">
+    <aside class="app-sidebar hidden md:flex md:fixed md:inset-y-0 md:left-0 md:flex-col md:overflow-y-auto bg-slate-900 text-slate-100 p-4 lg:p-5">
         <div>
             <div class="mb-5 flex items-center gap-2 px-1">
                 <img src="don.jpg" alt="DM Hub branding" class="h-8 w-8 rounded-full border-2 border-white/70 ring-2 ring-white/20 object-cover shadow">
@@ -568,7 +664,7 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
         </div>
     </aside>
 
-    <main class="min-w-0 flex-1 md:ml-64 lg:ml-72">
+    <main class="app-main flex-1">
         <div class="app-mobile-topbar md:hidden sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur">
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-2">
@@ -595,8 +691,14 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
         </div>
 
         <div class="app-content-wrap">
-            <header class="app-card-pad mb-5 rounded-2xl border border-slate-200 bg-white/90 shadow-sm">
-                <h2 class="app-page-title font-extrabold text-slate-900"><?= e($pageTitle) ?></h2>
+            <header class="app-page-title-wrap" role="banner">
+                <div class="app-page-title-main">
+                    <h2 class="app-page-title text-slate-900"><?= e($pageTitle) ?></h2>
+                    <span class="app-page-title-accent" aria-hidden="true"></span>
+                </div>
+                <?php if ($pageTitleActionHtml !== ''): ?>
+                    <div class="app-page-title-action"><?= $pageTitleActionHtml ?></div>
+                <?php endif; ?>
             </header>
 
             <?php foreach (consume_flashes() as $flash): ?>

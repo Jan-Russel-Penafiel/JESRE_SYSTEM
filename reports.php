@@ -59,6 +59,18 @@ $marketingCampaigns = $pdo->query("SELECT campaign_name, start_date, end_date, s
     LIMIT 12")
     ->fetchAll();
 
+$automatedCampaignCount = (int) $pdo->query("SELECT COUNT(*)
+    FROM marketing_campaigns
+    WHERE campaign_name LIKE 'AUTO-DIGITAL-%'")
+    ->fetchColumn();
+
+$latestAutomatedCampaign = $pdo->query("SELECT campaign_name, updated_at, approval_note
+    FROM marketing_campaigns
+    WHERE campaign_name LIKE 'AUTO-DIGITAL-%'
+    ORDER BY updated_at DESC
+    LIMIT 1")
+    ->fetch() ?: null;
+
 $pdfInventoryRows = array_map(static function (array $row): array {
     return [
         'item' => (string) $row['item_name'],
@@ -105,6 +117,7 @@ $pdfPayload = [
         'trackedCustomers' => (string) count($crmTopCustomers),
         'inventoryItems' => (string) count($inventoryRows),
         'lowStockAlerts' => (string) $lowStockCount,
+        'automatedPromotions' => (string) $automatedCampaignCount,
     ],
     'tables' => [
         'inventory' => $pdfInventoryRows,
@@ -119,12 +132,9 @@ $jsPdfVersion = is_file($jsPdfFile) ? (string) filemtime($jsPdfFile) : '1';
 
 $pageTitle = 'Summary Reports';
 $activePage = 'reports';
+$pageTitleActionHtml = "<button type=\"button\" onclick=\"exportSummaryPdf()\" class=\"app-title-action-btn rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white hover:bg-brand-900\">Export Summary PDF (jsPDF)</button>";
 require_once __DIR__ . '/includes/layout_top.php';
 ?>
-
-<section class="mb-4 flex justify-start sm:justify-end">
-    <button type="button" onclick="exportSummaryPdf()" class="w-full rounded-xl bg-brand-700 px-4 py-2 text-sm font-bold text-white hover:bg-brand-900 sm:w-auto">Export Summary PDF (jsPDF)</button>
-</section>
 
 <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -155,7 +165,7 @@ require_once __DIR__ . '/includes/layout_top.php';
 <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <h3 class="text-lg font-extrabold text-slate-900">Unified Output: Financial + CRM + Inventory</h3>
 
-    <div class="mt-4 grid gap-4 md:grid-cols-3">
+    <div class="mt-4 grid gap-4 md:grid-cols-4">
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p class="text-xs uppercase tracking-wider text-slate-500">Financial Summary</p>
             <p class="mt-2 text-sm text-slate-700">Income: <span class="font-bold"><?= e(format_money($income)) ?></span></p>
@@ -173,6 +183,12 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="text-xs uppercase tracking-wider text-slate-500">Inventory Status</p>
             <p class="mt-2 text-sm text-slate-700">Monitored items: <span class="font-bold"><?= e((string) count($inventoryRows)) ?></span></p>
             <p class="text-sm text-slate-700">Low stock count: <span class="font-bold"><?= e((string) $lowStockCount) ?></span></p>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs uppercase tracking-wider text-slate-500">Marketing Automation</p>
+            <p class="mt-2 text-sm text-slate-700">Auto campaigns: <span class="font-bold"><?= e((string) $automatedCampaignCount) ?></span></p>
+            <p class="text-sm text-slate-700">Latest: <span class="font-bold"><?= e((string) ($latestAutomatedCampaign['campaign_name'] ?? 'N/A')) ?></span></p>
         </div>
     </div>
 </section>
@@ -390,6 +406,7 @@ require_once __DIR__ . '/includes/layout_top.php';
         y = writeWrappedLine(doc, 'Tracked Customers: ' + reportPayload.summary.trackedCustomers, y, { x: 40, width: 515, lineHeight: 12 });
         y = writeWrappedLine(doc, 'Inventory Items: ' + reportPayload.summary.inventoryItems, y, { x: 40, width: 515, lineHeight: 12 });
         y = writeWrappedLine(doc, 'Low Stock Count: ' + reportPayload.summary.lowStockAlerts, y, { x: 40, width: 515, lineHeight: 12 });
+        y = writeWrappedLine(doc, 'Automated Promotions: ' + reportPayload.summary.automatedPromotions, y, { x: 40, width: 515, lineHeight: 12 });
         y += 8;
 
         y = writeSimpleTable(doc, 'Inventory Report', ['item', 'stock', 'reorder', 'updated'], reportPayload.tables.inventory, y);

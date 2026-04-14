@@ -7,7 +7,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 date_default_timezone_set('Asia/Manila');
 
-define('APP_NAME', 'DM Hub');
+define('APP_NAME', 'Don Macchiatos');
 define('ROLE_GENERAL_MANAGER', 'general_manager');
 define('ROLE_DEPARTMENT_HEAD', 'department_head');
 

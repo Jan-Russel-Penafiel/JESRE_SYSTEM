@@ -16,6 +16,7 @@ $approvedAccountingCount = 0;
 $lowStockCount = 0;
 $crmProfiles = 0;
 $approvedMarketingCount = 0;
+$automatedMarketingCount = 0;
 $income = 0.0;
 $expense = 0.0;
 $net = 0.0;
@@ -23,6 +24,8 @@ $pendingApprovals = 0;
 $myPendingSubmissions = 0;
 $lowStockItems = [];
 $topBeverages = [];
+$liveStockMonitorRows = [];
+$automatedPromotionFeed = [];
 $recentApprovals = [];
 
 $todaySalesAmount = (float) $pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM sales_orders WHERE status = 'approved' AND DATE(created_at) = CURDATE()")
@@ -42,6 +45,8 @@ $lowStockCount = (int) $pdo->query("SELECT COUNT(*) FROM inventory_items WHERE s
 $crmProfiles = (int) $pdo->query("SELECT COUNT(*) FROM crm_profiles WHERE status = 'approved'")
     ->fetchColumn();
 $approvedMarketingCount = (int) $pdo->query("SELECT COUNT(*) FROM marketing_campaigns WHERE status = 'approved'")
+    ->fetchColumn();
+$automatedMarketingCount = (int) $pdo->query("SELECT COUNT(*) FROM marketing_campaigns WHERE campaign_name LIKE 'AUTO-DIGITAL-%'")
     ->fetchColumn();
 
 $moduleApprovedCounts = [
@@ -97,6 +102,20 @@ $topBeverages = $pdo->query("SELECT beverage_name, SUM(quantity) AS total_quanti
     GROUP BY beverage_name
     ORDER BY total_quantity DESC
     LIMIT 6")
+    ->fetchAll();
+
+$liveStockMonitorRows = $pdo->query("SELECT item_name, stock_qty, reorder_level, unit, updated_at
+    FROM inventory_items
+    WHERE status = 'approved'
+    ORDER BY (stock_qty <= reorder_level) DESC, stock_qty ASC
+    LIMIT 8")
+    ->fetchAll();
+
+$automatedPromotionFeed = $pdo->query("SELECT campaign_name, start_date, end_date, status, updated_at
+    FROM marketing_campaigns
+    WHERE campaign_name LIKE 'AUTO-DIGITAL-%'
+    ORDER BY updated_at DESC
+    LIMIT 8")
     ->fetchAll();
 
 $chartJsFile = __DIR__ . '/assets/vendor/chartjs/chart.umd.js';
@@ -171,6 +190,10 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <p class="text-xs uppercase text-slate-500">Inventory</p>
                 <p class="text-sm font-bold text-slate-900"><?= e((string) $lowStockCount) ?> low stock items</p>
             </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p class="text-xs uppercase text-slate-500">Marketing Automation</p>
+                <p class="text-sm font-bold text-slate-900"><?= e((string) $automatedMarketingCount) ?> automated campaigns</p>
+            </div>
         </div>
 
         <?php if (($user['role'] ?? '') === ROLE_GENERAL_MANAGER): ?>
@@ -233,6 +256,73 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr><td colspan="3" class="py-3 text-slate-500">No approved sales yet.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>
+
+<section class="mt-6 grid gap-6 xl:grid-cols-2">
+    <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 class="text-lg font-extrabold text-slate-900">Live Stock Monitor</h3>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[760px] text-sm">
+                <thead>
+                    <tr class="text-left text-slate-500">
+                        <th class="pb-2 pr-4" data-priority="high">Item</th>
+                        <th class="pb-2 pr-4" data-priority="high">Available Stock</th>
+                        <th class="pb-2 pr-4" data-priority="medium">Reorder Level</th>
+                        <th class="pb-2" data-priority="high">Health</th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($liveStockMonitorRows): ?>
+                    <?php foreach ($liveStockMonitorRows as $stockRow): ?>
+                        <?php $isLowStock = (float) $stockRow['stock_qty'] <= (float) $stockRow['reorder_level']; ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-4 font-semibold"><?= e($stockRow['item_name']) ?></td>
+                            <td class="py-2 pr-4 <?= $isLowStock ? 'font-bold text-rose-600' : 'font-semibold text-slate-700' ?>"><?= e(number_format((float) $stockRow['stock_qty'], 2)) ?> <?= e($stockRow['unit']) ?></td>
+                            <td class="py-2 pr-4"><?= e(number_format((float) $stockRow['reorder_level'], 2)) ?> <?= e($stockRow['unit']) ?></td>
+                            <td class="py-2">
+                                <span class="rounded-full px-2 py-1 text-xs font-bold <?= $isLowStock ? 'bg-rose-100 text-rose-700 border border-rose-300' : 'bg-emerald-100 text-emerald-700 border border-emerald-300' ?>">
+                                    <?= $isLowStock ? 'LOW STOCK' : 'HEALTHY' ?>
+                                </span>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="4" class="py-3 text-slate-500">No approved inventory items found.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
+
+    <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 class="text-lg font-extrabold text-slate-900">Automated Digital Promotion Feed</h3>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[760px] text-sm">
+                <thead>
+                    <tr class="text-left text-slate-500">
+                        <th class="pb-2 pr-4" data-priority="high">Campaign</th>
+                        <th class="pb-2 pr-4" data-priority="medium">Duration</th>
+                        <th class="pb-2 pr-4" data-priority="high">Status</th>
+                        <th class="pb-2" data-priority="low">Updated</th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($automatedPromotionFeed): ?>
+                    <?php foreach ($automatedPromotionFeed as $campaign): ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-4 font-semibold"><?= e($campaign['campaign_name']) ?></td>
+                            <td class="py-2 pr-4"><?= e(format_table_value('start_date', $campaign['start_date'])) ?> - <?= e(format_table_value('end_date', $campaign['end_date'])) ?></td>
+                            <td class="py-2 pr-4"><span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) $campaign['status'])) ?>"><?= e(strtoupper((string) $campaign['status'])) ?></span></td>
+                            <td class="py-2 text-xs text-slate-500"><?= e(format_table_value('updated_at', $campaign['updated_at'])) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="4" class="py-3 text-slate-500">No automated campaigns found.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>

@@ -17,7 +17,7 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
 ## Departments and Tasks
 
 - Inventory Department
-  - Real-time stock monitoring
+  - Real-time stock monitoring (live auto-refresh)
   - Automatic updates
 - Production Department
   - Prepare beverages
@@ -34,7 +34,7 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
   - Track customer purchase history
 - Marketing Department
   - Analyze daily trends
-  - Plan and implement automated digital promotion
+  - Plan and execute automated digital promotion
 
 ## Role Access
 
@@ -54,9 +54,13 @@ On Sales approval:
 - Accounting income record is auto-created.
 - CRM profile is auto-created/updated.
 - CRM purchase history is auto-recorded.
+- Marketing campaign is auto-generated/updated (`AUTO-DIGITAL-YYYYMMDD`) using sales trend + inventory health.
 
 On Production approval:
 - Inventory is automatically deducted (`ingredient_used_qty`).
+
+Inventory monitoring:
+- `Inventory Department` page includes a live monitor panel that refreshes stock every 15 seconds via `inventory_live.php`.
 
 ## Audit Trail (Old/New Diff)
 

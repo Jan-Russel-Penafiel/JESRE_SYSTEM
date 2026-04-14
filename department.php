@@ -167,10 +167,12 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
 
         <div class="md:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2">
-            <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
-            <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
-            <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Create</button>
-            <p class="w-full rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 sm:ml-auto sm:w-auto">Total results: <?= e((string) $totalRows) ?></p>
+            <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
+                <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
+                <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Create</button>
+                <p class="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">Total results: <?= e((string) $totalRows) ?></p>
+            </div>
         </div>
     </form>
 

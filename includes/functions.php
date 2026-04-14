@@ -71,10 +71,87 @@ function department_short_label(string $departmentKey): string
 function can_user_access_department(array $user, string $departmentKey): bool
 {
     if (($user['role'] ?? null) === ROLE_GENERAL_MANAGER) {
-        return !in_array($departmentKey, ['inventory', 'production', 'sales', 'accounting', 'crm', 'marketing'], true);
+        return in_array($departmentKey, ['inventory', 'production', 'sales', 'accounting', 'crm', 'marketing'], true);
     }
 
     return ($user['role'] ?? null) === ROLE_DEPARTMENT_HEAD && ($user['department'] ?? '') === $departmentKey;
+}
+
+function fetch_sales_trend_snapshot(PDO $pdo, int $days = 7): array
+{
+    $days = max(1, $days);
+    $fromDate = date('Y-m-d', strtotime('-' . ($days - 1) . ' days'));
+
+    $stmt = $pdo->prepare("SELECT
+        COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN total_amount ELSE 0 END), 0) AS today_revenue,
+        COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN quantity ELSE 0 END), 0) AS today_qty,
+        COALESCE(SUM(CASE WHEN DATE(created_at) >= ? THEN total_amount ELSE 0 END), 0) AS range_revenue,
+        COALESCE(SUM(CASE WHEN DATE(created_at) >= ? THEN quantity ELSE 0 END), 0) AS range_qty,
+        COALESCE(SUM(CASE WHEN DATE(created_at) >= ? THEN 1 ELSE 0 END), 0) AS range_orders
+    FROM sales_orders
+    WHERE status = 'approved'");
+    $stmt->execute([$fromDate, $fromDate, $fromDate]);
+    $totals = $stmt->fetch() ?: [];
+
+    $topStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
+        FROM sales_orders
+        WHERE status = 'approved' AND DATE(created_at) >= ?
+        GROUP BY beverage_name
+        ORDER BY total_qty DESC, total_revenue DESC
+        LIMIT 1");
+    $topStmt->execute([$fromDate]);
+    $top = $topStmt->fetch() ?: null;
+
+    $avgRevenuePerDay = ((float) ($totals['range_revenue'] ?? 0)) / $days;
+    $todayRevenue = (float) ($totals['today_revenue'] ?? 0);
+
+    $direction = 'stable';
+    if ($avgRevenuePerDay > 0) {
+        if ($todayRevenue >= ($avgRevenuePerDay * 1.2)) {
+            $direction = 'up';
+        } elseif ($todayRevenue <= ($avgRevenuePerDay * 0.8)) {
+            $direction = 'down';
+        }
+    }
+
+    return [
+        'days' => $days,
+        'today_revenue' => $todayRevenue,
+        'today_qty' => (float) ($totals['today_qty'] ?? 0),
+        'range_revenue' => (float) ($totals['range_revenue'] ?? 0),
+        'range_qty' => (float) ($totals['range_qty'] ?? 0),
+        'range_orders' => (int) ($totals['range_orders'] ?? 0),
+        'avg_revenue_per_day' => $avgRevenuePerDay,
+        'direction' => $direction,
+        'top_beverage_name' => (string) ($top['beverage_name'] ?? ''),
+        'top_beverage_qty' => (float) ($top['total_qty'] ?? 0),
+        'top_beverage_revenue' => (float) ($top['total_revenue'] ?? 0),
+    ];
+}
+
+function fetch_inventory_health_snapshot(PDO $pdo): array
+{
+    $totalsStmt = $pdo->query("SELECT
+        COUNT(*) AS item_count,
+        COALESCE(SUM(stock_qty), 0) AS stock_total,
+        COALESCE(SUM(CASE WHEN stock_qty <= reorder_level THEN 1 ELSE 0 END), 0) AS low_stock_count
+    FROM inventory_items
+    WHERE status = 'approved'");
+    $totals = $totalsStmt->fetch() ?: [];
+
+    $lowStmt = $pdo->query("SELECT item_name, stock_qty, reorder_level, unit
+        FROM inventory_items
+        WHERE status = 'approved' AND stock_qty <= reorder_level
+        ORDER BY stock_qty ASC
+        LIMIT 5");
+    $lowItems = $lowStmt->fetchAll();
+
+    return [
+        'item_count' => (int) ($totals['item_count'] ?? 0),
+        'stock_total' => (float) ($totals['stock_total'] ?? 0),
+        'low_stock_count' => (int) ($totals['low_stock_count'] ?? 0),
+        'low_items' => $lowItems,
+    ];
 }
 
 function status_badge_class(string $status): string
