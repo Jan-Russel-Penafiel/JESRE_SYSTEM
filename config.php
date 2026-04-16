@@ -8,8 +8,17 @@ if (session_status() === PHP_SESSION_NONE) {
 date_default_timezone_set('Asia/Manila');
 
 define('APP_NAME', 'Don Macchiatos');
+define('APP_URL', rtrim((string) (getenv('APP_URL') ?: 'http://localhost/re'), '/'));
 define('ROLE_GENERAL_MANAGER', 'general_manager');
 define('ROLE_DEPARTMENT_HEAD', 'department_head');
+
+$realTimeSalesEnv = getenv('REALTIME_SALES_MODE');
+define(
+    'REALTIME_SALES_MODE',
+    $realTimeSalesEnv !== false
+        ? in_array(strtolower((string) $realTimeSalesEnv), ['1', 'true', 'yes', 'on'], true)
+        : false
+);
 
 define('DB_HOST', '127.0.0.1');
 define('DB_PORT', '3306');
@@ -18,6 +27,7 @@ define('DB_USER', 'root');
 define('DB_PASS', '');
 
 $DEPARTMENTS = [
+    'purchasing' => 'Purchasing Department',
     'inventory' => 'Inventory Department',
     'production' => 'Production Department',
     'sales' => 'Sales Department',
@@ -27,6 +37,30 @@ $DEPARTMENTS = [
 ];
 
 $DEPARTMENT_CONFIG = [
+    'purchasing' => [
+        'table' => 'purchase_requests',
+        'title' => 'Purchasing Department',
+        'description' => '',
+        'primary_label' => 'request_code',
+        'fields' => [
+            ['name' => 'request_code', 'label' => 'Request Code (optional)', 'type' => 'text', 'required' => false],
+            ['name' => 'inventory_item_id', 'label' => 'Ingredient to Purchase', 'type' => 'inventory_select', 'required' => true],
+            ['name' => 'requested_qty', 'label' => 'Requested Quantity', 'type' => 'number', 'step' => '0.01', 'required' => true],
+            ['name' => 'supplier_name', 'label' => 'Supplier Name', 'type' => 'text', 'required' => false],
+            ['name' => 'quoted_unit_cost', 'label' => 'Quoted Unit Cost', 'type' => 'number', 'step' => '0.01', 'required' => false],
+            ['name' => 'expected_delivery_date', 'label' => 'Expected Delivery Date', 'type' => 'date', 'required' => false],
+            ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea', 'required' => false],
+        ],
+        'list_columns' => [
+            'Request Code' => 'request_code',
+            'Ingredient Item' => 'inventory_item_id',
+            'Requested Qty' => 'requested_qty',
+            'Supplier' => 'supplier_name',
+            'Estimated Total' => 'estimated_total',
+            'Status' => 'status',
+            'Updated' => 'updated_at',
+        ],
+    ],
     'inventory' => [
         'table' => 'inventory_items',
         'title' => 'Inventory Department',
@@ -79,6 +113,8 @@ $DEPARTMENT_CONFIG = [
             ['name' => 'beverage_name', 'label' => 'Beverage Name', 'type' => 'text', 'required' => true],
             ['name' => 'quantity', 'label' => 'Quantity', 'type' => 'number', 'step' => '1', 'required' => true],
             ['name' => 'unit_price', 'label' => 'Unit Price', 'type' => 'number', 'step' => '0.01', 'required' => true],
+            ['name' => 'payment_method', 'label' => 'Payment Method', 'type' => 'select', 'required' => true, 'options' => ['cash' => 'Cash', 'card' => 'Card', 'digital' => 'Digital']],
+            ['name' => 'payment_reference', 'label' => 'Payment Reference (optional)', 'type' => 'text', 'required' => false],
             ['name' => 'inventory_item_id', 'label' => 'Inventory Item to Deduct', 'type' => 'inventory_select', 'required' => true],
             ['name' => 'stock_deduct_qty', 'label' => 'Stock Deduct Per Order', 'type' => 'number', 'step' => '0.01', 'required' => true],
             ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea', 'required' => false],
@@ -88,6 +124,8 @@ $DEPARTMENT_CONFIG = [
             'Customer' => 'customer_name',
             'Beverage' => 'beverage_name',
             'Qty' => 'quantity',
+            'Payment' => 'payment_method',
+            'Receipt' => 'receipt_no',
             'Total' => 'total_amount',
             'Status' => 'status',
             'Updated' => 'updated_at',

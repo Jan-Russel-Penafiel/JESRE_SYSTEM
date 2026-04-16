@@ -10,23 +10,28 @@ if (is_logged_in()) {
 $error = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
-
-    if ($username === '' || $password === '') {
-        $error = 'Username and password are required.';
+    $csrfToken = (string) ($_POST['csrf_token'] ?? '');
+    if (!is_valid_csrf_token($csrfToken)) {
+        $error = 'Invalid security token. Please refresh and try again.';
     } else {
-        $stmt = db()->prepare('SELECT * FROM users WHERE username = ? LIMIT 1');
-        $stmt->execute([$username]);
-        $user = $stmt->fetch();
+        $username = trim($_POST['username'] ?? '');
+        $password = $_POST['password'] ?? '';
 
-        if ($user && password_verify($password, $user['password_hash'])) {
-            login_user($user);
-            set_flash('success', 'Welcome back, ' . $user['full_name'] . '.');
-            redirect('dashboard.php');
+        if ($username === '' || $password === '') {
+            $error = 'Username and password are required.';
+        } else {
+            $stmt = db()->prepare('SELECT * FROM users WHERE username = ? LIMIT 1');
+            $stmt->execute([$username]);
+            $user = $stmt->fetch();
+
+            if ($user && password_verify($password, $user['password_hash'])) {
+                login_user($user);
+                set_flash('success', 'Welcome back, ' . $user['full_name'] . '.');
+                redirect('dashboard.php');
+            }
+
+            $error = 'Invalid login credentials.';
         }
-
-        $error = 'Invalid login credentials.';
     }
 }
 
@@ -206,6 +211,7 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             <?php endforeach; ?>
 
             <form method="post" class="mt-6 space-y-4">
+                <?= csrf_input() ?>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700">Username</label>
                     <input type="text" name="username" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
@@ -232,6 +238,7 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
 
             <div class="mt-5 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                 <div class="rounded-lg bg-slate-100 p-3">GM: gm / password123</div>
+                <div class="rounded-lg bg-slate-100 p-3">Purchasing: purch_head / password123</div>
                 <div class="rounded-lg bg-slate-100 p-3">Inventory: inv_head / password123</div>
                 <div class="rounded-lg bg-slate-100 p-3">Production: prod_head / password123</div>
                 <div class="rounded-lg bg-slate-100 p-3">Sales: sales_head / password123</div>

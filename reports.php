@@ -53,6 +53,19 @@ $dailySalesTrends = $pdo->query("SELECT DATE(created_at) AS trend_date, COUNT(*)
     LIMIT 10")
     ->fetchAll();
 
+$salesPerformance = fetch_sales_performance_snapshot($pdo, 30);
+$highSalesCoffee = trim((string) ($salesPerformance['high_sales_beverage_name'] ?? ''));
+if ($highSalesCoffee === '') {
+    $highSalesCoffee = 'N/A';
+}
+$highSalesQty = (float) ($salesPerformance['high_sales_qty'] ?? 0);
+
+$lowSalesCoffee = trim((string) ($salesPerformance['low_sales_beverage_name'] ?? ''));
+if ($lowSalesCoffee === '') {
+    $lowSalesCoffee = 'N/A';
+}
+$lowSalesQty = (float) ($salesPerformance['low_sales_qty'] ?? 0);
+
 $marketingCampaigns = $pdo->query("SELECT campaign_name, start_date, end_date, status, updated_at
     FROM marketing_campaigns
     ORDER BY updated_at DESC
@@ -118,6 +131,8 @@ $pdfPayload = [
         'inventoryItems' => (string) count($inventoryRows),
         'lowStockAlerts' => (string) $lowStockCount,
         'automatedPromotions' => (string) $automatedCampaignCount,
+        'highSalesCoffee' => $highSalesCoffee . ' (' . number_format($highSalesQty, 0) . ' qty)',
+        'lowSalesCoffee' => $lowSalesCoffee . ' (' . number_format($lowSalesQty, 0) . ' qty)',
     ],
     'tables' => [
         'inventory' => $pdfInventoryRows,
@@ -189,6 +204,25 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="text-xs uppercase tracking-wider text-slate-500">Marketing Automation</p>
             <p class="mt-2 text-sm text-slate-700">Auto campaigns: <span class="font-bold"><?= e((string) $automatedCampaignCount) ?></span></p>
             <p class="text-sm text-slate-700">Latest: <span class="font-bold"><?= e((string) ($latestAutomatedCampaign['campaign_name'] ?? 'N/A')) ?></span></p>
+        </div>
+    </div>
+</section>
+
+<section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <h3 class="text-lg font-extrabold text-slate-900">Sales Classification (Accounting + CRM Input)</h3>
+    <p class="mt-1 text-sm text-slate-600">Based on approved sales over the last 30 days.</p>
+
+    <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <p class="text-xs uppercase tracking-wider text-emerald-700">High Sales Coffee</p>
+            <p class="mt-1 text-xl font-black text-emerald-800"><?= e($highSalesCoffee) ?></p>
+            <p class="mt-1 text-sm font-semibold text-emerald-700">Sold Quantity: <?= e(number_format($highSalesQty, 0)) ?></p>
+        </div>
+
+        <div class="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p class="text-xs uppercase tracking-wider text-amber-700">Low Sales Coffee</p>
+            <p class="mt-1 text-xl font-black text-amber-800"><?= e($lowSalesCoffee) ?></p>
+            <p class="mt-1 text-sm font-semibold text-amber-700">Sold Quantity: <?= e(number_format($lowSalesQty, 0)) ?></p>
         </div>
     </div>
 </section>
@@ -407,6 +441,8 @@ require_once __DIR__ . '/includes/layout_top.php';
         y = writeWrappedLine(doc, 'Inventory Items: ' + reportPayload.summary.inventoryItems, y, { x: 40, width: 515, lineHeight: 12 });
         y = writeWrappedLine(doc, 'Low Stock Count: ' + reportPayload.summary.lowStockAlerts, y, { x: 40, width: 515, lineHeight: 12 });
         y = writeWrappedLine(doc, 'Automated Promotions: ' + reportPayload.summary.automatedPromotions, y, { x: 40, width: 515, lineHeight: 12 });
+        y = writeWrappedLine(doc, 'High Sales Coffee: ' + reportPayload.summary.highSalesCoffee, y, { x: 40, width: 515, lineHeight: 12 });
+        y = writeWrappedLine(doc, 'Low Sales Coffee: ' + reportPayload.summary.lowSalesCoffee, y, { x: 40, width: 515, lineHeight: 12 });
         y += 8;
 
         y = writeSimpleTable(doc, 'Inventory Report', ['item', 'stock', 'reorder', 'updated'], reportPayload.tables.inventory, y);

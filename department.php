@@ -114,7 +114,7 @@ $allInventoryItems = [];
 $approvedInventoryItems = [];
 $inventoryMap = [];
 
-if (in_array($department, ['production', 'sales'], true)) {
+if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
     $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
     foreach ($allInventoryItems as $item) {
         $inventoryMap[(int) $item['id']] = $item['item_name'] . ' (' . number_format((float) $item['stock_qty'], 2) . ' ' . $item['unit'] . ')';
@@ -203,6 +203,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                             <td class="py-2 pr-4">
                                 <?php if ($column === 'status'): ?>
                                     <span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) $row[$column])) ?>"><?= e(strtoupper((string) $row[$column])) ?></span>
+                                <?php elseif ($column === 'inventory_item_id'): ?>
+                                    <?= e($inventoryMap[(int) ($row[$column] ?? 0)] ?? '-') ?>
                                 <?php else: ?>
                                     <?= e(format_table_value($column, $row[$column] ?? null)) ?>
                                 <?php endif; ?>
@@ -253,6 +255,7 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
 
         <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+            <?= csrf_input() ?>
             <input type="hidden" name="action" value="create_record">
             <input type="hidden" name="dept" value="<?= e($department) ?>">
 
@@ -367,6 +370,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                 </div>
 
                 <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+                    <?= csrf_input() ?>
                     <input type="hidden" name="action" value="edit_record">
                     <input type="hidden" name="dept" value="<?= e($department) ?>">
                     <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">
@@ -421,6 +425,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <p class="mt-2 text-sm text-slate-600">This action cannot be undone. Approved records are locked and cannot be deleted.</p>
 
                 <form method="post" action="handlers.php" class="mt-4 flex justify-end gap-2">
+                    <?= csrf_input() ?>
                     <input type="hidden" name="action" value="delete_record">
                     <input type="hidden" name="dept" value="<?= e($department) ?>">
                     <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">

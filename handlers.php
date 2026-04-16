@@ -47,12 +47,159 @@ $assertOwnsRecord = static function (array $currentUser, array $record): void {
     }
 };
 
-$deductInventory = static function (PDO $db, int $inventoryItemId, float $deductQuantity, int $actorId, string $reason): void {
+$upsertLowStockPurchaseRequest = static function (PDO $db, int $inventoryItemId, int $actorId, string $reason) use ($fetchRecord): ?int {
+    if ($inventoryItemId <= 0) {
+        return null;
+    }
+
+    $inventoryStmt = $db->prepare('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE');
+    $inventoryStmt->execute([$inventoryItemId]);
+    $inventory = $inventoryStmt->fetch();
+    if (!$inventory) {
+        return null;
+    }
+
+    $stockQty = (float) ($inventory['stock_qty'] ?? 0);
+    $reorderLevel = (float) ($inventory['reorder_level'] ?? 0);
+    if ($stockQty > $reorderLevel) {
+        return null;
+    }
+
+    $targetRequestQty = max(($reorderLevel * 2) - $stockQty, $reorderLevel > 0 ? $reorderLevel : 1);
+    $targetRequestQty = round($targetRequestQty, 2);
+
+    $existingStmt = $db->prepare("SELECT * FROM purchase_requests
+        WHERE inventory_item_id = ? AND status = 'pending'
+        ORDER BY id DESC
+        LIMIT 1 FOR UPDATE");
+    $existingStmt->execute([$inventoryItemId]);
+    $existing = $existingStmt->fetch() ?: null;
+
+    if ($existing) {
+        $existingQty = (float) ($existing['requested_qty'] ?? 0);
+        if ($targetRequestQty > $existingQty) {
+            $oldRequest = $existing;
+            $existingNotes = trim((string) ($existing['notes'] ?? ''));
+            $newNotes = ($existingNotes !== '' ? ($existingNotes . "\n") : '') . '[SYSTEM] ' . $reason;
+
+            $updateStmt = $db->prepare("UPDATE purchase_requests
+                SET requested_qty = ?,
+                    estimated_total = CASE
+                        WHEN quoted_unit_cost IS NULL THEN estimated_total
+                        ELSE ROUND(quoted_unit_cost * ?, 2)
+                    END,
+                    notes = ?,
+                    updated_at = NOW()
+                WHERE id = ?");
+            $updateStmt->execute([$targetRequestQty, $targetRequestQty, $newNotes, (int) $existing['id']]);
+
+            $updatedRequest = $fetchRecord($db, 'purchase_requests', (int) $existing['id'], false);
+            write_audit_log(
+                $db,
+                'purchasing',
+                'purchase_requests',
+                (int) $existing['id'],
+                'system_update',
+                $oldRequest,
+                $updatedRequest,
+                $actorId,
+                'Auto-updated purchase request due to low stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
+                'system'
+            );
+        }
+
+        return (int) $existing['id'];
+    }
+
+    $requestCode = next_purchase_request_code($db);
+    $notes = '[SYSTEM] ' . $reason;
+
+    $insertStmt = $db->prepare("INSERT INTO purchase_requests
+        (request_code, inventory_item_id, requested_qty, supplier_name, quoted_unit_cost, estimated_total, expected_delivery_date, notes, status, submitted_by)
+        VALUES (?, ?, ?, NULL, NULL, 0, ?, ?, 'pending', ?)");
+    $insertStmt->execute([
+        $requestCode,
+        $inventoryItemId,
+        $targetRequestQty,
+        date('Y-m-d', strtotime('+3 days')),
+        $notes,
+        $actorId,
+    ]);
+
+    $purchaseRequestId = (int) $db->lastInsertId();
+    $purchaseRequest = $fetchRecord($db, 'purchase_requests', $purchaseRequestId, false);
+
+    write_audit_log(
+        $db,
+        'purchasing',
+        'purchase_requests',
+        $purchaseRequestId,
+        'system_create',
+        null,
+        $purchaseRequest,
+        $actorId,
+        'Auto-created purchase request from low stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
+        'system'
+    );
+
+    return $purchaseRequestId;
+};
+
+$ensureSalesFlavorAvailability = static function (
+    PDO $db,
+    int $inventoryItemId,
+    float $quantity,
+    float $stockDeductQty,
+    int $actorId
+) use ($upsertLowStockPurchaseRequest): void {
+    if ($inventoryItemId <= 0) {
+        throw new RuntimeException('Please select an inventory item for the selected flavor.');
+    }
+
+    $inventoryStmt = $db->prepare('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE');
+    $inventoryStmt->execute([$inventoryItemId]);
+    $inventory = $inventoryStmt->fetch();
+    if (!$inventory) {
+        throw new RuntimeException('Selected flavor is unavailable because the linked ingredient record does not exist.');
+    }
+
+    if (($inventory['status'] ?? '') !== 'approved') {
+        throw new RuntimeException('Selected flavor is unavailable because the linked inventory ingredient is not approved yet.');
+    }
+
+    $requiredQty = $quantity * $stockDeductQty;
+    if ($requiredQty <= 0) {
+        throw new RuntimeException('Stock deduct quantity must be greater than zero.');
+    }
+
+    $availableQty = (float) ($inventory['stock_qty'] ?? 0);
+    if ($availableQty < $requiredQty) {
+        $upsertLowStockPurchaseRequest(
+            $db,
+            $inventoryItemId,
+            $actorId,
+            'Flavor unavailable during POS entry. Required ' . number_format($requiredQty, 2) . ' but only ' . number_format($availableQty, 2) . ' available.'
+        );
+
+        throw new RuntimeException('Flavor unavailable for this order. A low-stock purchase request has been sent to Purchasing Department.');
+    }
+
+    if ($availableQty <= (float) ($inventory['reorder_level'] ?? 0)) {
+        $upsertLowStockPurchaseRequest(
+            $db,
+            $inventoryItemId,
+            $actorId,
+            'Flavor still available but already at/below reorder level during POS entry.'
+        );
+    }
+};
+
+$deductInventory = static function (PDO $db, int $inventoryItemId, float $deductQuantity, int $actorId, string $reason) use ($upsertLowStockPurchaseRequest): void {
     if ($inventoryItemId <= 0 || $deductQuantity <= 0) {
         return;
     }
 
-    $inventoryStmt = $db->prepare("SELECT id, item_name, unit, stock_qty, status FROM inventory_items WHERE id = ? FOR UPDATE");
+    $inventoryStmt = $db->prepare("SELECT id, item_name, unit, stock_qty, reorder_level, status FROM inventory_items WHERE id = ? FOR UPDATE");
     $inventoryStmt->execute([$inventoryItemId]);
     $inventory = $inventoryStmt->fetch();
 
@@ -90,6 +237,13 @@ $deductInventory = static function (PDO $db, int $inventoryItemId, float $deduct
         $reason,
         'system'
     );
+
+    $upsertLowStockPurchaseRequest(
+        $db,
+        $inventoryItemId,
+        $actorId,
+        'Low stock alert triggered after inventory deduction. ' . $reason
+    );
 };
 
 $syncAutomatedMarketingCampaign = static function (PDO $db, array $salesRecord, int $approverId) use ($fetchRecord): void {
@@ -100,14 +254,23 @@ $syncAutomatedMarketingCampaign = static function (PDO $db, array $salesRecord, 
 
     $campaignName = 'AUTO-DIGITAL-' . date('Ymd');
     $salesTrend = fetch_sales_trend_snapshot($db, 7);
+    $salesPerformance = fetch_sales_performance_snapshot($db, 30);
     $inventoryHealth = fetch_inventory_health_snapshot($db);
 
-    $topBeverage = trim((string) ($salesTrend['top_beverage_name'] ?? ''));
+    $topBeverage = trim((string) ($salesPerformance['high_sales_beverage_name'] ?? ''));
+    if ($topBeverage === '') {
+        $topBeverage = trim((string) ($salesTrend['top_beverage_name'] ?? ''));
+    }
     if ($topBeverage === '') {
         $topBeverage = trim((string) ($salesRecord['beverage_name'] ?? ''));
     }
     if ($topBeverage === '') {
         $topBeverage = 'Featured Beverage';
+    }
+
+    $lowSellingBeverage = trim((string) ($salesPerformance['low_sales_beverage_name'] ?? ''));
+    if ($lowSellingBeverage === '') {
+        $lowSellingBeverage = $topBeverage;
     }
 
     $direction = (string) ($salesTrend['direction'] ?? 'stable');
@@ -119,12 +282,14 @@ $syncAutomatedMarketingCampaign = static function (PDO $db, array $salesRecord, 
     }
 
     $trendNotes = sprintf(
-        'Auto-analysis from approved sales flow: 7-day revenue %s, today revenue %s vs average %s/day, top beverage %s (%s qty).',
+        'Auto-analysis from approved sales flow: 7-day revenue %s, today revenue %s vs average %s/day, high-sales beverage %s (%s qty), low-sales beverage %s (%s qty).',
         $directionLabel,
         number_format((float) ($salesTrend['today_revenue'] ?? 0), 2),
         number_format((float) ($salesTrend['avg_revenue_per_day'] ?? 0), 2),
         $topBeverage,
-        number_format((float) ($salesTrend['top_beverage_qty'] ?? 0), 0)
+        number_format((float) ($salesPerformance['high_sales_qty'] ?? 0), 0),
+        $lowSellingBeverage,
+        number_format((float) ($salesPerformance['low_sales_qty'] ?? 0), 0)
     );
 
     $lowStockCount = (int) ($inventoryHealth['low_stock_count'] ?? 0);
@@ -133,8 +298,8 @@ $syncAutomatedMarketingCampaign = static function (PDO $db, array $salesRecord, 
     }, $inventoryHealth['low_items'] ?? []);
     $lowStockSummary = $lowStockItems ? implode(', ', $lowStockItems) : 'none';
 
-    $promotionPlan = 'Auto digital promo: run social feed, SMS, and checkout banner for ' . $topBeverage . '. '
-        . 'Include limited-time bundle incentive and conversion tracking per channel.';
+    $promotionPlan = 'Auto digital promo priority: promote low-sales coffee ' . $lowSellingBeverage . ' via social feed, SMS, and checkout banner. '
+        . 'Bundle with high-sales coffee ' . $topBeverage . ' to improve conversion and repeat buying.';
 
     if ($lowStockCount > 0) {
         $promotionPlan .= ' Inventory guard active: reduce exposure for low-stock items (' . $lowStockSummary . ') and prioritize available alternatives.';
@@ -223,6 +388,46 @@ $syncAutomatedMarketingCampaign = static function (PDO $db, array $salesRecord, 
 };
 
 $applyApprovalAutomation = static function (PDO $db, string $dept, array $record, int $approverId) use ($deductInventory, $fetchRecord, $syncAutomatedMarketingCampaign): void {
+    if ($dept === 'purchasing') {
+        $inventoryItemId = (int) ($record['inventory_item_id'] ?? 0);
+        $requestedQty = (float) ($record['requested_qty'] ?? 0);
+
+        if ($inventoryItemId <= 0 || $requestedQty <= 0) {
+            throw new RuntimeException('Purchase request must include a valid inventory item and requested quantity.');
+        }
+
+        $inventoryStmt = $db->prepare('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE');
+        $inventoryStmt->execute([$inventoryItemId]);
+        $inventory = $inventoryStmt->fetch();
+        if (!$inventory) {
+            throw new RuntimeException('Linked inventory item for purchase request does not exist.');
+        }
+
+        if (($inventory['status'] ?? '') !== 'approved') {
+            throw new RuntimeException('Linked inventory item must be approved before purchase restocking.');
+        }
+
+        $oldInventory = $inventory;
+        $updateInventory = $db->prepare('UPDATE inventory_items SET stock_qty = stock_qty + ?, updated_at = NOW() WHERE id = ?');
+        $updateInventory->execute([$requestedQty, $inventoryItemId]);
+
+        $updatedInventory = $fetchRecord($db, 'inventory_items', $inventoryItemId, false);
+        write_audit_log(
+            $db,
+            'inventory',
+            'inventory_items',
+            $inventoryItemId,
+            'system_update',
+            $oldInventory,
+            $updatedInventory,
+            $approverId,
+            'Auto-restocked inventory from approved purchase request #' . (int) ($record['id'] ?? 0) . '.',
+            'system'
+        );
+
+        return;
+    }
+
     if ($dept === 'production') {
         $deductInventory(
             $db,
@@ -361,6 +566,10 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
 };
 
 try {
+    if (!is_valid_csrf_token((string) ($_POST['csrf_token'] ?? ''))) {
+        throw new RuntimeException('Invalid security token. Please refresh and try again.');
+    }
+
     if ($action === 'create_record') {
         $config = $requireConfig($department);
 
@@ -385,23 +594,63 @@ try {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
         }
 
+        if ($department === 'purchasing') {
+            $data['requested_qty'] = (float) ($data['requested_qty'] ?? 0);
+            $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
+            $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
+            $data['request_code'] = ($data['request_code'] ?? null) ?: next_purchase_request_code($pdo);
+            $data['estimated_total'] = $data['quoted_unit_cost'] === null
+                ? 0
+                : ($data['requested_qty'] * (float) $data['quoted_unit_cost']);
+        }
+
         if ($department === 'sales') {
             $data['quantity'] = (int) ($data['quantity'] ?? 0);
             $data['unit_price'] = (float) ($data['unit_price'] ?? 0);
             $data['stock_deduct_qty'] = (float) ($data['stock_deduct_qty'] ?? 0);
             $data['order_code'] = ($data['order_code'] ?? null) ?: next_order_code($pdo);
+            $data['payment_method'] = (string) ($data['payment_method'] ?? 'cash');
+            $data['payment_reference'] = $data['payment_reference'] ?? null;
+            $data['payment_status'] = 'paid';
+            $data['receipt_no'] = next_receipt_code($pdo);
+            $data['paid_at'] = date('Y-m-d H:i:s');
             $data['total_amount'] = $data['quantity'] * $data['unit_price'];
         }
 
         $table = $config['table'];
         $data['status'] = 'pending';
         $data['submitted_by'] = (int) ($user['id'] ?? 0);
+        $realTimeSales = $department === 'sales' && REALTIME_SALES_MODE;
+        if ($realTimeSales) {
+            $data['status'] = 'approved';
+            $data['approved_by'] = (int) ($user['id'] ?? 0);
+            $data['approval_note'] = 'Auto-approved in real-time POS mode.';
+            $data['approved_at'] = date('Y-m-d H:i:s');
+        }
 
         $columns = array_keys($data);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
         $columnSql = implode(', ', $columns);
 
         $pdo->beginTransaction();
+
+        if ($department === 'purchasing') {
+            $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
+            $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
+            if (!$inventoryLinkStmt->fetch()) {
+                throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
+            }
+        }
+
+        if ($department === 'sales') {
+            $ensureSalesFlavorAvailability(
+                $pdo,
+                (int) ($data['inventory_item_id'] ?? 0),
+                (float) ($data['quantity'] ?? 0),
+                (float) ($data['stock_deduct_qty'] ?? 0),
+                (int) ($user['id'] ?? 0)
+            );
+        }
 
         $stmt = $pdo->prepare("INSERT INTO {$table} ({$columnSql}) VALUES ({$placeholders})");
         $stmt->execute(array_values($data));
@@ -418,13 +667,33 @@ try {
             null,
             $createdRecord,
             (int) ($user['id'] ?? 0),
-            'Record created and submitted for approval.',
+            $realTimeSales
+                ? 'Record created and processed in real-time POS mode.'
+                : 'Record created and submitted for approval.',
             'user'
         );
 
+        if ($realTimeSales) {
+            $applyApprovalAutomation($pdo, $department, $createdRecord ?? [], (int) ($user['id'] ?? 0));
+
+            $log = $pdo->prepare('INSERT INTO approval_logs (module, record_id, action, note, action_by) VALUES (?, ?, ?, ?, ?)');
+            $log->execute([
+                $department,
+                $recordId,
+                'approved',
+                'Auto-approved in real-time POS mode.',
+                (int) ($user['id'] ?? 0),
+            ]);
+        }
+
         $pdo->commit();
 
-        set_flash('success', department_label($department) . ' record created and sent for GM approval.');
+        set_flash(
+            'success',
+            $realTimeSales
+                ? (department_label($department) . ' record created and processed in real-time.')
+                : (department_label($department) . ' record created and sent for GM approval.')
+        );
         $redirectToDepartment($department);
     }
 
@@ -471,21 +740,70 @@ try {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
         }
 
+        if ($department === 'purchasing') {
+            $data['requested_qty'] = (float) ($data['requested_qty'] ?? 0);
+            $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
+            $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
+            $data['request_code'] = ($data['request_code'] ?? null) ?: (string) ($record['request_code'] ?? next_purchase_request_code($pdo));
+            $data['estimated_total'] = $data['quoted_unit_cost'] === null
+                ? 0
+                : ($data['requested_qty'] * (float) $data['quoted_unit_cost']);
+        }
+
         if ($department === 'sales') {
             $data['quantity'] = (int) ($data['quantity'] ?? 0);
             $data['unit_price'] = (float) ($data['unit_price'] ?? 0);
             $data['stock_deduct_qty'] = (float) ($data['stock_deduct_qty'] ?? 0);
             $data['order_code'] = ($data['order_code'] ?? null) ?: (string) ($record['order_code'] ?? next_order_code($pdo));
+            $data['payment_method'] = (string) ($data['payment_method'] ?? ($record['payment_method'] ?? 'cash'));
+            $data['payment_reference'] = $data['payment_reference'] ?? null;
+            $data['payment_status'] = 'paid';
+            $data['receipt_no'] = (string) ($record['receipt_no'] ?? '');
+            if ($data['receipt_no'] === '') {
+                $data['receipt_no'] = next_receipt_code($pdo);
+            }
+            $data['paid_at'] = (string) ($record['paid_at'] ?? '');
+            if ($data['paid_at'] === '') {
+                $data['paid_at'] = date('Y-m-d H:i:s');
+            }
             $data['total_amount'] = $data['quantity'] * $data['unit_price'];
         }
+
+        if ($department === 'purchasing') {
+            $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
+            $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
+            if (!$inventoryLinkStmt->fetch()) {
+                throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
+            }
+        }
+
+        if ($department === 'sales') {
+            $ensureSalesFlavorAvailability(
+                $pdo,
+                (int) ($data['inventory_item_id'] ?? 0),
+                (float) ($data['quantity'] ?? 0),
+                (float) ($data['stock_deduct_qty'] ?? 0),
+                (int) ($user['id'] ?? 0)
+            );
+        }
+
+        $realTimeSales = $department === 'sales' && REALTIME_SALES_MODE;
+        $nextStatus = $realTimeSales ? 'approved' : 'pending';
+        $nextApprovedBy = $realTimeSales ? (int) ($user['id'] ?? 0) : null;
+        $nextApprovalNote = $realTimeSales ? 'Auto-approved in real-time POS mode.' : null;
+        $nextApprovedAt = $realTimeSales ? date('Y-m-d H:i:s') : null;
 
         $assignments = [];
         foreach (array_keys($data) as $column) {
             $assignments[] = $column . ' = ?';
         }
 
-        $sql = "UPDATE {$table} SET " . implode(', ', $assignments) . ", status = 'pending', approved_by = NULL, approval_note = NULL, approved_at = NULL, submitted_by = ?, updated_at = NOW() WHERE id = ?";
+        $sql = "UPDATE {$table} SET " . implode(', ', $assignments) . ", status = ?, approved_by = ?, approval_note = ?, approved_at = ?, submitted_by = ?, updated_at = NOW() WHERE id = ?";
         $params = array_values($data);
+        $params[] = $nextStatus;
+        $params[] = $nextApprovedBy;
+        $params[] = $nextApprovalNote;
+        $params[] = $nextApprovedAt;
         $params[] = (int) ($user['id'] ?? 0);
         $params[] = $id;
 
@@ -502,13 +820,33 @@ try {
             $record,
             $updatedRecord,
             (int) ($user['id'] ?? 0),
-            'Record edited and re-submitted for approval.',
+            $realTimeSales
+                ? 'Record edited and re-processed in real-time POS mode.'
+                : 'Record edited and re-submitted for approval.',
             'user'
         );
 
+        if ($realTimeSales) {
+            $applyApprovalAutomation($pdo, $department, $updatedRecord ?? [], (int) ($user['id'] ?? 0));
+
+            $log = $pdo->prepare('INSERT INTO approval_logs (module, record_id, action, note, action_by) VALUES (?, ?, ?, ?, ?)');
+            $log->execute([
+                $department,
+                $id,
+                'approved',
+                'Auto-approved in real-time POS mode.',
+                (int) ($user['id'] ?? 0),
+            ]);
+        }
+
         $pdo->commit();
 
-        set_flash('success', 'Record updated and re-submitted for approval.');
+        set_flash(
+            'success',
+            $realTimeSales
+                ? 'Record updated and processed in real-time.'
+                : 'Record updated and re-submitted for approval.'
+        );
         $redirectToDepartment($department);
     }
 
@@ -593,6 +931,16 @@ try {
         $update->execute([$decision, (int) ($user['id'] ?? 0), $approvalNote !== '' ? $approvalNote : null, $id]);
 
         $updatedRecord = $fetchRecord($pdo, $table, $id, false);
+
+        if ($decision === 'approved' && $department === 'inventory') {
+            $upsertLowStockPurchaseRequest(
+                $pdo,
+                (int) ($updatedRecord['id'] ?? 0),
+                (int) ($user['id'] ?? 0),
+                'Low stock update sent from approved inventory record #' . $id . '.'
+            );
+        }
+
         write_audit_log(
             $pdo,
             $department,

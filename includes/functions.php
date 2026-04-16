@@ -6,6 +6,36 @@ function e($value): string
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+function csrf_token(): string
+{
+    $token = $_SESSION['_csrf_token'] ?? null;
+    if (!is_string($token) || $token === '') {
+        $token = bin2hex(random_bytes(32));
+        $_SESSION['_csrf_token'] = $token;
+    }
+
+    return $token;
+}
+
+function csrf_input(): string
+{
+    return '<input type="hidden" name="csrf_token" value="' . e(csrf_token()) . '">';
+}
+
+function is_valid_csrf_token(?string $token): bool
+{
+    if (!is_string($token) || $token === '') {
+        return false;
+    }
+
+    $sessionToken = $_SESSION['_csrf_token'] ?? null;
+    if (!is_string($sessionToken) || $sessionToken === '') {
+        return false;
+    }
+
+    return hash_equals($sessionToken, $token);
+}
+
 function set_flash(string $type, string $message): void
 {
     $_SESSION['flashes'][] = [
@@ -71,7 +101,7 @@ function department_short_label(string $departmentKey): string
 function can_user_access_department(array $user, string $departmentKey): bool
 {
     if (($user['role'] ?? null) === ROLE_GENERAL_MANAGER) {
-        return in_array($departmentKey, ['inventory', 'production', 'sales', 'accounting', 'crm', 'marketing'], true);
+        return in_array($departmentKey, ['purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing'], true);
     }
 
     return ($user['role'] ?? null) === ROLE_DEPARTMENT_HEAD && ($user['department'] ?? '') === $departmentKey;
@@ -129,6 +159,40 @@ function fetch_sales_trend_snapshot(PDO $pdo, int $days = 7): array
     ];
 }
 
+function fetch_sales_performance_snapshot(PDO $pdo, int $days = 30): array
+{
+    $days = max(1, $days);
+    $fromDate = date('Y-m-d', strtotime('-' . ($days - 1) . ' days'));
+
+    $topStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
+        FROM sales_orders
+        WHERE status = 'approved' AND DATE(created_at) >= ?
+        GROUP BY beverage_name
+        ORDER BY total_qty DESC, total_revenue DESC
+        LIMIT 1");
+    $topStmt->execute([$fromDate]);
+    $top = $topStmt->fetch() ?: null;
+
+    $lowStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
+        FROM sales_orders
+        WHERE status = 'approved' AND DATE(created_at) >= ?
+        GROUP BY beverage_name
+        ORDER BY total_qty ASC, total_revenue ASC
+        LIMIT 1");
+    $lowStmt->execute([$fromDate]);
+    $low = $lowStmt->fetch() ?: null;
+
+    return [
+        'days' => $days,
+        'high_sales_beverage_name' => (string) ($top['beverage_name'] ?? ''),
+        'high_sales_qty' => (float) ($top['total_qty'] ?? 0),
+        'high_sales_revenue' => (float) ($top['total_revenue'] ?? 0),
+        'low_sales_beverage_name' => (string) ($low['beverage_name'] ?? ''),
+        'low_sales_qty' => (float) ($low['total_qty'] ?? 0),
+        'low_sales_revenue' => (float) ($low['total_revenue'] ?? 0),
+    ];
+}
+
 function fetch_inventory_health_snapshot(PDO $pdo): array
 {
     $totalsStmt = $pdo->query("SELECT
@@ -178,17 +242,17 @@ function format_table_value(string $column, $value): string
         return '-';
     }
 
-    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'amount', 'total_amount', 'total_spent'], true)) {
+    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'amount', 'total_amount', 'total_spent', 'requested_qty', 'quoted_unit_cost', 'estimated_total'], true)) {
         return number_format((float) $value, 2);
     }
 
-    if (in_array($column, ['created_at', 'updated_at', 'approved_at', 'last_purchase_at'], true)) {
+    if (in_array($column, ['created_at', 'updated_at', 'approved_at', 'last_purchase_at', 'paid_at'], true)) {
         $timestamp = strtotime((string) $value);
 
         return $timestamp ? date('M d, Y h:i A', $timestamp) : (string) $value;
     }
 
-    if (in_array($column, ['start_date', 'end_date'], true)) {
+    if (in_array($column, ['start_date', 'end_date', 'expected_delivery_date'], true)) {
         $timestamp = strtotime((string) $value);
 
         return $timestamp ? date('M d, Y', $timestamp) : (string) $value;
@@ -200,11 +264,40 @@ function format_table_value(string $column, $value): string
 function next_order_code(PDO $pdo): string
 {
     $prefix = 'DM' . date('Ymd');
-    $stmt = $pdo->query("SELECT COUNT(*) AS total FROM sales_orders WHERE DATE(created_at) = CURDATE()");
-    $row = $stmt->fetch();
-    $sequence = ((int) ($row['total'] ?? 0)) + 1;
+    $sequence = next_sequence_value($pdo, 'sales_order_code');
 
     return $prefix . '-' . str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+}
+
+function next_purchase_request_code(PDO $pdo): string
+{
+    $prefix = 'PR' . date('Ymd');
+    $sequence = next_sequence_value($pdo, 'purchase_request_code');
+
+    return $prefix . '-' . str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+}
+
+function next_receipt_code(PDO $pdo): string
+{
+    $prefix = 'RCPT-' . date('Ymd');
+    $sequence = next_sequence_value($pdo, 'sales_receipt_code');
+
+    return $prefix . '-' . str_pad((string) $sequence, 4, '0', STR_PAD_LEFT);
+}
+
+function next_sequence_value(PDO $pdo, string $sequenceKey): int
+{
+    $stmt = $pdo->prepare("INSERT INTO code_sequences (sequence_key, sequence_date, last_value, updated_at)
+        VALUES (?, CURDATE(), LAST_INSERT_ID(1), NOW())
+        ON DUPLICATE KEY UPDATE
+            last_value = IF(sequence_date = CURDATE(), LAST_INSERT_ID(last_value + 1), LAST_INSERT_ID(1)),
+            sequence_date = CURDATE(),
+            updated_at = NOW()");
+    $stmt->execute([$sequenceKey]);
+
+    $sequence = (int) $pdo->query('SELECT LAST_INSERT_ID()')->fetchColumn();
+
+    return $sequence > 0 ? $sequence : 1;
 }
 
 function validate_department_input(array $departmentConfig, array $source): array
@@ -249,6 +342,31 @@ function validate_department_input(array $departmentConfig, array $source): arra
             }
 
             $data[$name] = (int) $raw;
+            continue;
+        }
+
+        if ($type === 'select') {
+            $options = $field['options'] ?? [];
+            if (!is_array($options) || $options === []) {
+                $errors[] = $field['label'] . ' has no valid options configured.';
+                continue;
+            }
+
+            if ($raw === '') {
+                if ($required) {
+                    $errors[] = $field['label'] . ' is required.';
+                } else {
+                    $data[$name] = null;
+                }
+                continue;
+            }
+
+            if (!array_key_exists((string) $raw, $options)) {
+                $errors[] = $field['label'] . ' has an invalid option.';
+                continue;
+            }
+
+            $data[$name] = (string) $raw;
             continue;
         }
 

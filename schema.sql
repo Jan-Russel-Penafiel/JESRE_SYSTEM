@@ -7,8 +7,15 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(60) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role ENUM('general_manager', 'department_head') NOT NULL,
-    department ENUM('inventory', 'production', 'sales', 'accounting', 'crm', 'marketing') NULL,
+    department ENUM('purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing') NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS code_sequences (
+    sequence_key VARCHAR(64) PRIMARY KEY,
+    sequence_date DATE NOT NULL,
+    last_value INT UNSIGNED NOT NULL DEFAULT 0,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -30,6 +37,30 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     INDEX idx_inventory_stock (stock_qty, reorder_level),
     CONSTRAINT fk_inventory_submitted_by FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_inventory_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS purchase_requests (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    request_code VARCHAR(40) NOT NULL UNIQUE,
+    inventory_item_id INT UNSIGNED NOT NULL,
+    requested_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+    supplier_name VARCHAR(160) NULL,
+    quoted_unit_cost DECIMAL(12,2) NULL,
+    estimated_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+    expected_delivery_date DATE NULL,
+    notes TEXT NULL,
+    status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+    submitted_by INT UNSIGNED NULL,
+    approved_by INT UNSIGNED NULL,
+    approval_note TEXT NULL,
+    approved_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_purchase_status (status),
+    INDEX idx_purchase_inventory (inventory_item_id),
+    CONSTRAINT fk_purchase_inventory_item FOREIGN KEY (inventory_item_id) REFERENCES inventory_items (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_purchase_submitted_by FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT fk_purchase_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS production_logs (
@@ -59,6 +90,11 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     beverage_name VARCHAR(120) NOT NULL,
     quantity INT UNSIGNED NOT NULL,
     unit_price DECIMAL(12,2) NOT NULL,
+    payment_method ENUM('cash', 'card', 'digital') NOT NULL DEFAULT 'cash',
+    payment_reference VARCHAR(120) NULL,
+    payment_status ENUM('paid', 'pending', 'failed') NOT NULL DEFAULT 'paid',
+    receipt_no VARCHAR(60) NULL UNIQUE,
+    paid_at DATETIME NULL,
     inventory_item_id INT UNSIGNED NULL,
     stock_deduct_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
     total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -150,7 +186,7 @@ CREATE TABLE IF NOT EXISTS marketing_campaigns (
 
 CREATE TABLE IF NOT EXISTS approval_logs (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    module ENUM('inventory', 'production', 'sales', 'accounting', 'crm', 'marketing') NOT NULL,
+    module ENUM('purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing') NOT NULL,
     record_id INT UNSIGNED NOT NULL,
     action ENUM('approved', 'rejected') NOT NULL,
     note TEXT NULL,
@@ -163,7 +199,7 @@ CREATE TABLE IF NOT EXISTS approval_logs (
 
 CREATE TABLE IF NOT EXISTS audit_trails (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    module ENUM('inventory', 'production', 'sales', 'accounting', 'crm', 'marketing', 'system') NOT NULL,
+    module ENUM('purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing', 'system') NOT NULL,
     table_name VARCHAR(100) NOT NULL,
     record_id INT UNSIGNED NOT NULL,
     action_type VARCHAR(40) NOT NULL,
@@ -185,6 +221,7 @@ SET @default_hash = '$2y$10$ZW3PzJX7mq29MOVYD9Y.OeygDemi6SSdo.Ue5YgvpsoEsAzWv/ro
 INSERT INTO users (full_name, username, password_hash, role, department)
 VALUES
     ('General Manager', 'gm', @default_hash, 'general_manager', NULL),
+    ('Purchasing Head', 'purch_head', @default_hash, 'department_head', 'purchasing'),
     ('Inventory Head', 'inv_head', @default_hash, 'department_head', 'inventory'),
     ('Production Head', 'prod_head', @default_hash, 'department_head', 'production'),
     ('Sales Head', 'sales_head', @default_hash, 'department_head', 'sales'),

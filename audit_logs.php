@@ -6,7 +6,7 @@ require_general_manager();
 
 $pdo = db();
 
-$moduleOptions = ['all', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing', 'system'];
+$moduleOptions = ['all', 'purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing', 'system'];
 $actionOptions = ['all', 'create', 'edit', 'delete', 'approved', 'rejected', 'system_create', 'system_update'];
 $sourceOptions = ['all', 'user', 'system'];
 

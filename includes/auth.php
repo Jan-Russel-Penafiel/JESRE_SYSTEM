@@ -13,6 +13,8 @@ function is_logged_in(): bool
 
 function login_user(array $user): void
 {
+    session_regenerate_id(true);
+
     $_SESSION['user'] = [
         'id' => (int) $user['id'],
         'full_name' => $user['full_name'],

@@ -9,6 +9,7 @@ $pdo = db();
 
 $todaySalesAmount = 0.0;
 $todaySalesOrders = 0;
+$approvedPurchasingCount = 0;
 $approvedInventoryCount = 0;
 $approvedProductionCount = 0;
 $approvedSalesCount = 0;
@@ -27,10 +28,17 @@ $topBeverages = [];
 $liveStockMonitorRows = [];
 $automatedPromotionFeed = [];
 $recentApprovals = [];
+$salesPerformance = [];
+$highSalesCoffee = 'N/A';
+$highSalesQty = 0.0;
+$lowSalesCoffee = 'N/A';
+$lowSalesQty = 0.0;
 
 $todaySalesAmount = (float) $pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM sales_orders WHERE status = 'approved' AND DATE(created_at) = CURDATE()")
     ->fetchColumn();
 $todaySalesOrders = (int) $pdo->query("SELECT COUNT(*) FROM sales_orders WHERE status = 'approved' AND DATE(created_at) = CURDATE()")
+    ->fetchColumn();
+$approvedPurchasingCount = (int) $pdo->query("SELECT COUNT(*) FROM purchase_requests WHERE status = 'approved'")
     ->fetchColumn();
 $approvedInventoryCount = (int) $pdo->query("SELECT COUNT(*) FROM inventory_items WHERE status = 'approved'")
     ->fetchColumn();
@@ -49,7 +57,21 @@ $approvedMarketingCount = (int) $pdo->query("SELECT COUNT(*) FROM marketing_camp
 $automatedMarketingCount = (int) $pdo->query("SELECT COUNT(*) FROM marketing_campaigns WHERE campaign_name LIKE 'AUTO-DIGITAL-%'")
     ->fetchColumn();
 
+$salesPerformance = fetch_sales_performance_snapshot($pdo, 30);
+$highSalesCoffee = trim((string) ($salesPerformance['high_sales_beverage_name'] ?? ''));
+if ($highSalesCoffee === '') {
+    $highSalesCoffee = 'N/A';
+}
+$highSalesQty = (float) ($salesPerformance['high_sales_qty'] ?? 0);
+
+$lowSalesCoffee = trim((string) ($salesPerformance['low_sales_beverage_name'] ?? ''));
+if ($lowSalesCoffee === '') {
+    $lowSalesCoffee = 'N/A';
+}
+$lowSalesQty = (float) ($salesPerformance['low_sales_qty'] ?? 0);
+
 $moduleApprovedCounts = [
+    'Purchasing' => $approvedPurchasingCount,
     'Inventory' => $approvedInventoryCount,
     'Production' => $approvedProductionCount,
     'Sales' => $approvedSalesCount,
@@ -136,7 +158,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <p class="text-xs uppercase tracking-wider text-slate-500">Inventory Monitoring</p>
         <h3 class="mt-1 text-2xl font-black text-slate-900"><?= e((string) $approvedInventoryCount) ?> active items</h3>
-        <p class="mt-1 text-sm <?= $lowStockCount > 0 ? 'text-rose-600 font-semibold' : 'text-slate-500' ?>">Alert items: <?= e((string) $lowStockCount) ?></p>
+        <p id="inventoryAlertText" class="mt-1 text-sm <?= $lowStockCount > 0 ? 'text-rose-600 font-semibold' : 'text-slate-500' ?>">Alert items: <span id="inventoryAlertCount"><?= e((string) $lowStockCount) ?></span></p>
     </article>
 
     <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -188,11 +210,16 @@ require_once __DIR__ . '/includes/layout_top.php';
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <p class="text-xs uppercase text-slate-500">Inventory</p>
-                <p class="text-sm font-bold text-slate-900"><?= e((string) $lowStockCount) ?> low stock items</p>
+                <p class="text-sm font-bold text-slate-900"><span id="summaryLowStockCount"><?= e((string) $lowStockCount) ?></span> low stock items</p>
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <p class="text-xs uppercase text-slate-500">Marketing Automation</p>
                 <p class="text-sm font-bold text-slate-900"><?= e((string) $automatedMarketingCount) ?> automated campaigns</p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p class="text-xs uppercase text-slate-500">Sales Classification</p>
+                <p class="text-sm font-bold text-slate-900">High-sales coffee: <?= e($highSalesCoffee) ?> (<?= e(number_format($highSalesQty, 0)) ?> qty)</p>
+                <p class="text-sm font-bold text-slate-900">Low-sales coffee: <?= e($lowSalesCoffee) ?> (<?= e(number_format($lowSalesQty, 0)) ?> qty)</p>
             </div>
         </div>
 
@@ -265,7 +292,10 @@ require_once __DIR__ . '/includes/layout_top.php';
 
 <section class="mt-6 grid gap-6 xl:grid-cols-2">
     <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 class="text-lg font-extrabold text-slate-900">Live Stock Monitor</h3>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-lg font-extrabold text-slate-900">Live Stock Monitor</h3>
+            <p id="liveStockGeneratedAt" class="text-xs font-semibold text-slate-500">Auto-refresh: pending</p>
+        </div>
         <div class="table-scroll mt-3">
             <table class="stack-table w-full min-w-[760px] text-sm">
                 <thead>
@@ -276,7 +306,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                         <th class="pb-2" data-priority="high">Health</th>
                     </tr>
                 </thead>
-                <tbody class="text-slate-700">
+                <tbody id="liveStockTableBody" class="text-slate-700">
                 <?php if ($liveStockMonitorRows): ?>
                     <?php foreach ($liveStockMonitorRows as $stockRow): ?>
                         <?php $isLowStock = (float) $stockRow['stock_qty'] <= (float) $stockRow['reorder_level']; ?>
@@ -392,7 +422,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                         '#f59e0b',
                         '#f87171',
                         '#a78bfa',
-                        '#38bdf8'
+                        '#38bdf8',
+                        '#f97316'
                     ],
                     borderColor: '#0f172a'
                 }]
@@ -420,6 +451,101 @@ require_once __DIR__ . '/includes/layout_top.php';
                 }
             }
         });
+    })();
+
+    (function () {
+        const canRefreshLiveStock = <?= json_encode(can_user_access_department($user ?? [], 'inventory')) ?>;
+        if (!canRefreshLiveStock) {
+            return;
+        }
+
+        const tableBody = document.getElementById('liveStockTableBody');
+        const alertCountNode = document.getElementById('inventoryAlertCount');
+        const summaryLowStockNode = document.getElementById('summaryLowStockCount');
+        const alertTextNode = document.getElementById('inventoryAlertText');
+        const generatedLabelNode = document.getElementById('liveStockGeneratedAt');
+
+        if (!tableBody || !alertCountNode || !summaryLowStockNode || !alertTextNode || !generatedLabelNode) {
+            return;
+        }
+
+        const escapeHtml = function (value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
+        const renderRows = function (items) {
+            if (!Array.isArray(items) || !items.length) {
+                tableBody.innerHTML = '<tr><td colspan="4" class="py-3 text-slate-500">No approved inventory items found.</td></tr>';
+                return;
+            }
+
+            tableBody.innerHTML = items.map(function (item) {
+                const stockQty = Number(item.stock_qty || 0);
+                const reorderLevel = Number(item.reorder_level || 0);
+                const isLow = item.health === 'low_stock' || stockQty <= reorderLevel;
+                const stockClass = isLow ? 'font-bold text-rose-600' : 'font-semibold text-slate-700';
+                const badgeClass = isLow
+                    ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                    : 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+                const health = isLow ? 'LOW STOCK' : 'HEALTHY';
+                const unit = escapeHtml(item.unit || '');
+                const itemName = escapeHtml(item.item_name || '-');
+
+                return '<tr class="border-t border-slate-100">'
+                    + '<td class="py-2 pr-4 font-semibold">' + itemName + '</td>'
+                    + '<td class="py-2 pr-4 ' + stockClass + '">' + stockQty.toFixed(2) + ' ' + unit + '</td>'
+                    + '<td class="py-2 pr-4">' + reorderLevel.toFixed(2) + ' ' + unit + '</td>'
+                    + '<td class="py-2"><span class="rounded-full px-2 py-1 text-xs font-bold ' + badgeClass + '">' + health + '</span></td>'
+                    + '</tr>';
+            }).join('');
+
+            if (window.applyStackTableLabels) {
+                const table = tableBody.closest('table.stack-table');
+                if (table) {
+                    window.applyStackTableLabels(table);
+                }
+            }
+        };
+
+        const refreshLiveStock = function () {
+            fetch('inventory_live.php', {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('Unable to refresh live stock monitor.');
+                    }
+
+                    return response.json();
+                })
+                .then(function (payload) {
+                    if (!payload || payload.ok !== true) {
+                        throw new Error('Invalid live stock payload.');
+                    }
+
+                    const lowStockCount = Number((payload.summary || {}).low_stock_count || 0);
+                    alertCountNode.textContent = String(lowStockCount);
+                    summaryLowStockNode.textContent = String(lowStockCount);
+                    generatedLabelNode.textContent = 'Auto-refresh: ' + (payload.generated_label || 'updated');
+                    alertTextNode.className = 'mt-1 text-sm ' + (lowStockCount > 0 ? 'text-rose-600 font-semibold' : 'text-slate-500');
+
+                    renderRows(payload.items || []);
+                })
+                .catch(function () {
+                    generatedLabelNode.textContent = 'Auto-refresh: unavailable';
+                });
+        };
+
+        refreshLiveStock();
+        window.setInterval(refreshLiveStock, 15000);
     })();
 </script>
 

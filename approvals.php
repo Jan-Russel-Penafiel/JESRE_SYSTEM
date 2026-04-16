@@ -144,6 +144,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="mt-2 text-sm text-slate-600">Confirm approval for this record.</p>
 
             <form method="post" action="handlers.php" class="mt-4 space-y-3">
+                <?= csrf_input() ?>
                 <input type="hidden" name="action" value="approve_record">
                 <input type="hidden" name="dept" value="<?= e($departmentKey) ?>">
                 <input type="hidden" name="id" value="<?= e((string) $recordId) ?>">
@@ -165,6 +166,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="mt-2 text-sm text-slate-600">Rejected data remains in the current department for correction and re-submission.</p>
 
             <form method="post" action="handlers.php" class="mt-4 space-y-3">
+                <?= csrf_input() ?>
                 <input type="hidden" name="action" value="reject_record">
                 <input type="hidden" name="dept" value="<?= e($departmentKey) ?>">
                 <input type="hidden" name="id" value="<?= e((string) $recordId) ?>">
