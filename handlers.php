@@ -47,7 +47,14 @@ $assertOwnsRecord = static function (array $currentUser, array $record): void {
     }
 };
 
-$upsertLowStockPurchaseRequest = static function (PDO $db, int $inventoryItemId, int $actorId, string $reason) use ($fetchRecord): ?int {
+$upsertLowStockPurchaseRequest = static function (
+    PDO $db,
+    int $inventoryItemId,
+    int $actorId,
+    string $reason,
+    ?float $requestedQtyOverride = null,
+    bool $forceCreate = false
+) use ($fetchRecord): ?int {
     if ($inventoryItemId <= 0) {
         return null;
     }
@@ -61,12 +68,16 @@ $upsertLowStockPurchaseRequest = static function (PDO $db, int $inventoryItemId,
 
     $stockQty = (float) ($inventory['stock_qty'] ?? 0);
     $reorderLevel = (float) ($inventory['reorder_level'] ?? 0);
-    if ($stockQty > $reorderLevel) {
+    if (!$forceCreate && $stockQty > $reorderLevel) {
         return null;
     }
 
-    $targetRequestQty = max(($reorderLevel * 2) - $stockQty, $reorderLevel > 0 ? $reorderLevel : 1);
-    $targetRequestQty = round($targetRequestQty, 2);
+    if ($requestedQtyOverride !== null && $requestedQtyOverride > 0) {
+        $targetRequestQty = round(max($requestedQtyOverride, 1), 2);
+    } else {
+        $targetRequestQty = max(($reorderLevel * 2) - $stockQty, $reorderLevel > 0 ? $reorderLevel : 1);
+        $targetRequestQty = round($targetRequestQty, 2);
+    }
 
     $existingStmt = $db->prepare("SELECT * FROM purchase_requests
         WHERE inventory_item_id = ? AND status = 'pending'
@@ -174,13 +185,6 @@ $ensureSalesFlavorAvailability = static function (
 
     $availableQty = (float) ($inventory['stock_qty'] ?? 0);
     if ($availableQty < $requiredQty) {
-        $upsertLowStockPurchaseRequest(
-            $db,
-            $inventoryItemId,
-            $actorId,
-            'Flavor unavailable during POS entry. Required ' . number_format($requiredQty, 2) . ' but only ' . number_format($availableQty, 2) . ' available.'
-        );
-
         throw new RuntimeException('Flavor unavailable for this order. A low-stock purchase request has been sent to Purchasing Department.');
     }
 
@@ -189,7 +193,9 @@ $ensureSalesFlavorAvailability = static function (
             $db,
             $inventoryItemId,
             $actorId,
-            'Flavor still available but already at/below reorder level during POS entry.'
+            'Flavor still available but already at/below reorder level during POS entry.',
+            null,
+            false
         );
     }
 };
@@ -242,7 +248,9 @@ $deductInventory = static function (PDO $db, int $inventoryItemId, float $deduct
         $db,
         $inventoryItemId,
         $actorId,
-        'Low stock alert triggered after inventory deduction. ' . $reason
+        'Low stock alert triggered after inventory deduction. ' . $reason,
+        null,
+        false
     );
 };
 
@@ -632,16 +640,6 @@ try {
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
         $columnSql = implode(', ', $columns);
 
-        $pdo->beginTransaction();
-
-        if ($department === 'purchasing') {
-            $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
-            $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
-            if (!$inventoryLinkStmt->fetch()) {
-                throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
-            }
-        }
-
         if ($department === 'sales') {
             $ensureSalesFlavorAvailability(
                 $pdo,
@@ -650,6 +648,16 @@ try {
                 (float) ($data['stock_deduct_qty'] ?? 0),
                 (int) ($user['id'] ?? 0)
             );
+        }
+
+        $pdo->beginTransaction();
+
+        if ($department === 'purchasing') {
+            $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
+            $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
+            if (!$inventoryLinkStmt->fetch()) {
+                throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
+            }
         }
 
         $stmt = $pdo->prepare("INSERT INTO {$table} ({$columnSql}) VALUES ({$placeholders})");
@@ -710,9 +718,8 @@ try {
         }
 
         $table = $config['table'];
-        $pdo->beginTransaction();
 
-        $record = $fetchRecord($pdo, $table, $id, true);
+        $record = $fetchRecord($pdo, $table, $id, false);
         if (!$record) {
             throw new RuntimeException('Record not found.');
         }
@@ -769,14 +776,6 @@ try {
             $data['total_amount'] = $data['quantity'] * $data['unit_price'];
         }
 
-        if ($department === 'purchasing') {
-            $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
-            $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
-            if (!$inventoryLinkStmt->fetch()) {
-                throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
-            }
-        }
-
         if ($department === 'sales') {
             $ensureSalesFlavorAvailability(
                 $pdo,
@@ -785,6 +784,27 @@ try {
                 (float) ($data['stock_deduct_qty'] ?? 0),
                 (int) ($user['id'] ?? 0)
             );
+        }
+
+        $pdo->beginTransaction();
+
+        $record = $fetchRecord($pdo, $table, $id, true);
+        if (!$record) {
+            throw new RuntimeException('Record not found.');
+        }
+
+        $assertOwnsRecord($user ?? [], $record);
+
+        if (($record['status'] ?? '') === 'approved') {
+            throw new RuntimeException('Approved records are locked from editing.');
+        }
+
+        if ($department === 'purchasing') {
+            $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
+            $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
+            if (!$inventoryLinkStmt->fetch()) {
+                throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
+            }
         }
 
         $realTimeSales = $department === 'sales' && REALTIME_SALES_MODE;
@@ -937,7 +957,9 @@ try {
                 $pdo,
                 (int) ($updatedRecord['id'] ?? 0),
                 (int) ($user['id'] ?? 0),
-                'Low stock update sent from approved inventory record #' . $id . '.'
+                'Low stock update sent from approved inventory record #' . $id . '.',
+                null,
+                false
             );
         }
 
@@ -969,7 +991,60 @@ try {
         $pdo->rollBack();
     }
 
-    set_flash('error', $exception->getMessage());
+    $errorMessage = $exception->getMessage();
+    $flavorUnavailablePrefix = 'Flavor unavailable for this order.';
+
+    if (
+        $department === 'sales'
+        && in_array($action, ['create_record', 'edit_record'], true)
+        && strncmp($errorMessage, $flavorUnavailablePrefix, strlen($flavorUnavailablePrefix)) === 0
+    ) {
+        $inventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
+        $quantity = (float) ($_POST['quantity'] ?? 0);
+        $stockDeductQty = (float) ($_POST['stock_deduct_qty'] ?? 0);
+
+        if ($inventoryItemId > 0 && $quantity > 0 && $stockDeductQty > 0) {
+            $requiredQty = $quantity * $stockDeductQty;
+
+            try {
+                $inventoryStmt = $pdo->prepare('SELECT stock_qty FROM inventory_items WHERE id = ? LIMIT 1');
+                $inventoryStmt->execute([$inventoryItemId]);
+                $inventoryRow = $inventoryStmt->fetch() ?: null;
+
+                if ($inventoryRow !== null) {
+                    $availableQty = (float) ($inventoryRow['stock_qty'] ?? 0);
+                    $shortageQty = max($requiredQty - $availableQty, 1);
+
+                    $pdo->beginTransaction();
+
+                    $purchaseRequestId = $upsertLowStockPurchaseRequest(
+                        $pdo,
+                        $inventoryItemId,
+                        (int) ($user['id'] ?? 0),
+                        'Flavor unavailable during POS entry. Required ' . number_format($requiredQty, 2) . ' but only ' . number_format($availableQty, 2) . ' available.',
+                        $shortageQty,
+                        true
+                    );
+
+                    $pdo->commit();
+
+                    if ($purchaseRequestId === null) {
+                        $errorMessage = 'Flavor unavailable for this order. Unable to auto-create a purchase request right now. Please notify Purchasing Department manually.';
+                    }
+                } else {
+                    $errorMessage = 'Flavor unavailable for this order. Unable to locate the linked inventory item for auto-escalation.';
+                }
+            } catch (Throwable $escalationException) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                $errorMessage = 'Flavor unavailable for this order. Unable to auto-create a purchase request right now. Please notify Purchasing Department manually.';
+            }
+        }
+    }
+
+    set_flash('error', $errorMessage);
 
     if (in_array($action, ['approve_record', 'reject_record'], true)) {
         redirect('approvals.php');
