@@ -227,7 +227,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <?php foreach ($rows as $row): ?>
                     <?php
                     $rowId = (int) $row['id'];
-                    $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
+                    $inventoryItemName = strtolower(trim((string) ($row['item_name'] ?? '')));
+                    $isInventoryCupOrStraw = $department === 'inventory' && in_array($inventoryItemName, ['cup', 'straw'], true);
+                    $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0) || $isInventoryCupOrStraw);
                     $isApproved = ($row['status'] ?? '') === 'approved';
                     $receiptPayload = null;
                     if ($department === 'sales') {
@@ -273,8 +275,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                                     <button type="button" data-receipt="<?= e((string) json_encode($receiptPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?>" onclick="printSalesReceiptFromButton(this)" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100">Print Receipt</button>
                                 <?php endif; ?>
                                 <?php if ($canManage): ?>
-                                    <button type="button" onclick="openModal('edit-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>">Edit</button>
-                                    <button type="button" onclick="openModal('delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>">Delete</button>
+                                    <button type="button" onclick="openModal('edit-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100">Edit</button>
+                                    <button type="button" onclick="openModal('delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100">Delete</button>
                                 <?php endif; ?>
                             </div>
                         </td>
@@ -397,7 +399,9 @@ require_once __DIR__ . '/includes/layout_top.php';
 <?php foreach ($rows as $row): ?>
     <?php
     $rowId = (int) $row['id'];
-    $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
+    $inventoryItemName = strtolower(trim((string) ($row['item_name'] ?? '')));
+    $isInventoryCupOrStraw = $department === 'inventory' && in_array($inventoryItemName, ['cup', 'straw'], true);
+    $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0) || $isInventoryCupOrStraw);
     $isApproved = ($row['status'] ?? '') === 'approved';
     ?>
 
@@ -551,7 +555,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php endforeach; ?>
 
                     <div class="md:col-span-2 flex justify-end">
-                        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>"><?= e($editLabel) ?></button>
+                        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($editLabel) ?></button>
                     </div>
                 </form>
             </div>
@@ -560,7 +564,7 @@ require_once __DIR__ . '/includes/layout_top.php';
         <div id="delete-<?= e($department) ?>-<?= e((string) $rowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')">
             <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
                 <h4 class="text-lg font-extrabold text-slate-900">Delete Record #<?= e((string) $rowId) ?></h4>
-                <p class="mt-2 text-sm text-slate-600">This action cannot be undone. Approved records are locked and cannot be deleted.</p>
+                <p class="mt-2 text-sm text-slate-600">This action cannot be undone.</p>
 
                 <form method="post" action="handlers.php" class="mt-4 flex justify-end gap-2">
                     <?= csrf_input() ?>
@@ -568,7 +572,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <input type="hidden" name="dept" value="<?= e($department) ?>">
                     <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">
                     <button type="button" onclick="closeModal('delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
-                    <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>">Delete</button>
+                    <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">Delete</button>
                 </form>
             </div>
         </div>

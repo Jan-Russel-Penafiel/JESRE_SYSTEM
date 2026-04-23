@@ -951,10 +951,6 @@ try {
 
         $assertOwnsRecord($user ?? [], $record);
 
-        if (($record['status'] ?? '') === 'approved') {
-            throw new RuntimeException('Approved records are locked from editing.');
-        }
-
         [$data, $errors] = validate_department_input($config, $_POST);
         if ($errors) {
             throw new RuntimeException(implode(' ', $errors));
@@ -1055,10 +1051,6 @@ try {
 
         $assertOwnsRecord($user ?? [], $record);
 
-        if (($record['status'] ?? '') === 'approved') {
-            throw new RuntimeException('Approved records are locked from editing.');
-        }
-
         if ($department === 'purchasing') {
             $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
             $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
@@ -1151,10 +1143,6 @@ try {
         }
 
         $assertOwnsRecord($user ?? [], $record);
-
-        if (($record['status'] ?? '') === 'approved') {
-            throw new RuntimeException('Approved records cannot be deleted.');
-        }
 
         write_audit_log(
             $pdo,
