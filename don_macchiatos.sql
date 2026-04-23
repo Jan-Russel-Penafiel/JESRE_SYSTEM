@@ -61,7 +61,7 @@ INSERT INTO `accounting_entries` (`id`, `entry_type`, `source`, `amount`, `descr
 
 CREATE TABLE `approval_logs` (
   `id` int(10) UNSIGNED NOT NULL,
-  `module` enum('inventory','production','sales','accounting','crm','marketing') NOT NULL,
+  `module` enum('purchasing','inventory','production','sales','accounting','crm','marketing') NOT NULL,
   `record_id` int(10) UNSIGNED NOT NULL,
   `action` enum('approved','rejected') NOT NULL,
   `note` text DEFAULT NULL,
@@ -69,29 +69,26 @@ CREATE TABLE `approval_logs` (
   `action_at` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
---
--- Dumping data for table `approval_logs`
---
 
 INSERT INTO `approval_logs` (`id`, `module`, `record_id`, `action`, `note`, `action_by`, `action_at`) VALUES
 (1, 'production', 1, 'approved', NULL, 1, '2026-04-14 09:52:01'),
 (2, 'marketing', 1, 'approved', 'Auto-approved marketing campaign from sales automation flow.', 4, '2026-04-16 11:03:43'),
 (3, 'sales', 2, 'approved', 'Auto-approved in real-time POS mode.', 4, '2026-04-16 11:03:43'),
 (4, 'sales', 3, 'approved', 'Auto-approved in real-time POS mode.', 4, '2026-04-16 11:19:04'),
-(5, '', 4, 'approved', 'smoke gm approve', 1, '2026-04-19 11:18:14'),
+(5, 'purchasing', 4, 'approved', 'smoke gm approve', 1, '2026-04-19 11:18:14'),
 (6, 'marketing', 2, 'approved', 'Auto-approved marketing campaign from sales automation flow.', 4, '2026-04-19 11:18:30'),
 (7, 'sales', 4, 'approved', 'Auto-approved in real-time POS mode.', 4, '2026-04-19 11:18:30'),
 (8, 'marketing', 3, 'approved', 'Auto-approved marketing campaign from sales automation flow.', 1, '2026-04-23 10:40:23'),
 (9, 'sales', 1, 'approved', NULL, 1, '2026-04-23 10:40:23'),
-(11, '', 7, 'approved', 'Orderly flow auto-restock approval', 1, '2026-04-23 10:47:28'),
-(13, '', 8, 'approved', 'Orderly flow auto-restock approval', 1, '2026-04-23 10:49:56'),
-(14, '', 9, 'approved', 'Orderly flow manual restock approval', 1, '2026-04-23 10:49:56'),
-(18, '', 11, 'approved', NULL, 1, '2026-04-23 11:06:45'),
-(19, '', 12, 'approved', NULL, 1, '2026-04-23 11:07:40'),
-(20, '', 13, 'approved', NULL, 1, '2026-04-23 12:27:04'),
-(21, '', 14, 'approved', NULL, 1, '2026-04-23 12:27:06'),
-(22, '', 15, 'approved', NULL, 1, '2026-04-23 12:27:08'),
-(23, '', 16, 'approved', NULL, 1, '2026-04-23 12:27:09'),
+(11, 'purchasing', 7, 'approved', 'Orderly flow auto-restock approval', 1, '2026-04-23 10:47:28'),
+(13, 'purchasing', 8, 'approved', 'Orderly flow auto-restock approval', 1, '2026-04-23 10:49:56'),
+(14, 'purchasing', 9, 'approved', 'Orderly flow manual restock approval', 1, '2026-04-23 10:49:56'),
+(18, 'purchasing', 11, 'approved', NULL, 1, '2026-04-23 11:06:45'),
+(19, 'purchasing', 12, 'approved', NULL, 1, '2026-04-23 11:07:40'),
+(20, 'purchasing', 13, 'approved', NULL, 1, '2026-04-23 12:27:04'),
+(21, 'purchasing', 14, 'approved', NULL, 1, '2026-04-23 12:27:06'),
+(22, 'purchasing', 15, 'approved', NULL, 1, '2026-04-23 12:27:08'),
+(23, 'purchasing', 16, 'approved', NULL, 1, '2026-04-23 12:27:09'),
 (24, 'sales', 7, 'approved', 'Auto-approved in real-time POS mode.', 1, '2026-04-23 13:01:24');
 
 -- --------------------------------------------------------
