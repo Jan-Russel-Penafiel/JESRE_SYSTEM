@@ -2,17 +2,17 @@
 
 A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowchart.
 
-## Core Workflow (Based on flowchart.png)
+## Core Workflow (Based on flowchart.jpg)
 
-1. Department Head creates/updates a department record.
-2. Record becomes `pending` (except Sales when `REALTIME_SALES_MODE=1`, where it is auto-approved).
-3. General Manager reviews pending records in the Approval Queue.
-4. If approved (or auto-approved in real-time sales mode), downstream automation executes.
-5. If rejected, record stays in the same department for correction and resubmission.
-6. Final consolidated outputs are shown in the Summary Reports module:
-   - Financial Reports
-   - CRM Insights
-   - Inventory Status
+1. Purchasing buys ingredients before inventory runs out.
+2. Inventory receives ingredients, stores them in the database, auto-deducts stock on sales, and raises low-stock updates.
+3. Production requests ingredients from Inventory and logs beverage preparation.
+4. Sales confirms customer orders in POS, checks flavor availability, processes payment, issues the receipt, and updates sales logs in real time.
+5. Accounting records financial transactions and stores digital logs.
+6. CRM tracks customer preferences and purchase history.
+7. Marketing analyzes trends and promotes low-sales coffee.
+
+Manager review remains available as an oversight layer for pending non-POS records, but the operational flow is department-driven.
 
 ## Departments and Tasks
 
@@ -27,11 +27,11 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
   - Prepare beverages
   - Input usage
 - Sales Department
-  - Process customer orders
+  - Process customer orders directly in POS
   - Process POS payment method (cash/card/digital)
   - Generate digital order code and receipt number
-  - Automate sales recording
-  - Inventory auto-deducted after approval (or immediately when real-time sales mode is enabled)
+  - Automate sales recording in real time
+  - Inventory auto-deducted when the order is processed
 - Accounting Department
   - Record financial transactions
   - Generate financial reports
@@ -55,7 +55,7 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
 
 ## Automation Rules
 
-On Sales approval (or immediately on Sales create/edit when `REALTIME_SALES_MODE=1`):
+On Sales processing (real-time POS mode is now enabled by default):
 - Inventory is automatically deducted (`quantity * stock_deduct_qty`).
 - Accounting income record is auto-created.
 - CRM profile is auto-created/updated.
@@ -65,7 +65,7 @@ On Sales approval (or immediately on Sales create/edit when `REALTIME_SALES_MODE
 
 On Sales create/edit (POS validation):
 - Flavor availability is checked against linked inventory stock.
-- If insufficient stock, submission is blocked and a low-stock purchasing request is auto-created.
+- If insufficient stock, submission is blocked, Inventory is alerted, and a low-stock purchasing request is auto-created.
 - Payment is marked paid and receipt number is auto-issued.
 
 ## Security Hardening
@@ -125,7 +125,7 @@ Inventory monitoring:
 - `login.php` - Authentication screen
 - `dashboard.php` - Central dashboard
 - `department.php` - Department CRUD with modals
-- `approvals.php` - General Manager approval queue
+- `approvals.php` - Manager review queue
 - `audit_logs.php` - General Manager audit trail browser
 - `reports.php` - Final consolidated reports
 - `handlers.php` - POST actions and approval automation
@@ -137,7 +137,7 @@ Inventory monitoring:
 2. Start Apache and MySQL in XAMPP.
 3. Import `schema.sql` into MySQL (via phpMyAdmin or MySQL CLI).
 4. If needed, edit DB credentials in `config.php`.
-5. (Optional) Enable real-time sales flow by setting environment variable `REALTIME_SALES_MODE=1`.
+5. Sales POS runs in real time by default. If needed, override with environment variable `REALTIME_SALES_MODE=0`.
 6. Open: `http://localhost/re`.
 
 If you are upgrading from an earlier version of this project, back up data first, then recreate the database from `schema.sql` so Purchasing and POS schema updates are fully applied.

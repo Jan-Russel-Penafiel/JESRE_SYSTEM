@@ -113,6 +113,9 @@ $rows = $stmt->fetchAll();
 $allInventoryItems = [];
 $approvedInventoryItems = [];
 $inventoryMap = [];
+$createButtonLabel = (string) ($config['create_button_label'] ?? 'Create Record');
+$submitLabel = (string) ($config['submit_label'] ?? 'Save Record');
+$editLabel = (string) ($config['edit_label'] ?? 'Save Changes');
 
 if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
     $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
@@ -170,7 +173,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
                 <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
                 <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
-                <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Create</button>
+                <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($createButtonLabel) ?></button>
                 <p class="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">Total results: <?= e((string) $totalRows) ?></p>
             </div>
         </div>
@@ -250,7 +253,7 @@ require_once __DIR__ . '/includes/layout_top.php';
 <div id="modal-create" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'modal-create')">
     <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
         <div class="flex items-start justify-between gap-3">
-            <h4 class="text-lg font-extrabold text-slate-900">Create <?= e($config['title']) ?> Record</h4>
+            <h4 class="text-lg font-extrabold text-slate-900"><?= e($createButtonLabel) ?></h4>
             <button type="button" onclick="closeModal('modal-create')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
         </div>
 
@@ -296,7 +299,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             <?php endforeach; ?>
 
             <div class="md:col-span-2 flex justify-end">
-                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Submit for Approval</button>
+                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($submitLabel) ?></button>
             </div>
         </form>
     </div>
@@ -413,7 +416,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php endforeach; ?>
 
                     <div class="md:col-span-2 flex justify-end">
-                        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>">Save and Re-submit</button>
+                        <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>"><?= e($editLabel) ?></button>
                     </div>
                 </form>
             </div>

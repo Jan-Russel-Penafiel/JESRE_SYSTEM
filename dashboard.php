@@ -179,10 +179,10 @@ require_once __DIR__ . '/includes/layout_top.php';
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h3 class="text-lg font-extrabold text-slate-900">Summary of All Data Statistics</h3>
-                <p class="text-sm text-slate-600">Approved records per module.</p>
+                <p class="text-sm text-slate-600">Processed and approved records per module.</p>
             </div>
             <?php if (($user['role'] ?? '') === ROLE_GENERAL_MANAGER): ?>
-                <a href="approvals.php" class="inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Open Approval Queue (<?= e((string) $pendingApprovals) ?>)</a>
+                <a href="approvals.php" class="inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Open Review Queue (<?= e((string) $pendingApprovals) ?>)</a>
             <?php else: ?>
                 <p class="rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">Pending submissions: <?= e((string) $myPendingSubmissions) ?></p>
             <?php endif; ?>
@@ -362,7 +362,7 @@ require_once __DIR__ . '/includes/layout_top.php';
 
 <?php if (($user['role'] ?? '') === ROLE_GENERAL_MANAGER): ?>
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 class="text-lg font-extrabold text-slate-900">Recent Approval Activity</h3>
+        <h3 class="text-lg font-extrabold text-slate-900">Recent Manager Review Activity</h3>
         <div class="table-scroll mt-3">
             <table class="stack-table w-full min-w-[760px] text-sm">
                 <thead>
@@ -412,7 +412,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Approved Records',
+                    label: 'Processed / Approved Records',
                     data: values,
                     borderWidth: 1,
                     borderRadius: 8,

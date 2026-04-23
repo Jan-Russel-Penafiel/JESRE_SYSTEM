@@ -41,14 +41,14 @@ $recentLogs = $pdo->query("SELECT l.*, u.full_name AS approver_name
     LIMIT 12")
     ->fetchAll();
 
-$pageTitle = 'General Manager Approval Queue';
+$pageTitle = 'Manager Review Queue';
 $activePage = 'approvals';
 require_once __DIR__ . '/includes/layout_top.php';
 ?>
 
 <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div class="mb-3 text-left sm:text-right">
-        <span class="inline-flex rounded-xl bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">Total Pending: <?= e((string) count($pendingRecords)) ?></span>
+        <span class="inline-flex rounded-xl bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">Pending Review: <?= e((string) count($pendingRecords)) ?></span>
     </div>
 
     <div class="table-scroll">
@@ -141,7 +141,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div id="approve-<?= e($departmentKey) ?>-<?= e((string) $recordId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'approve-<?= e($departmentKey) ?>-<?= e((string) $recordId) ?>')">
         <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
             <h4 class="text-lg font-extrabold text-slate-900">Approve Record #<?= e((string) $recordId) ?></h4>
-            <p class="mt-2 text-sm text-slate-600">Confirm approval for this record.</p>
+            <p class="mt-2 text-sm text-slate-600">Confirm manager review approval for this record.</p>
 
             <form method="post" action="handlers.php" class="mt-4 space-y-3">
                 <?= csrf_input() ?>
@@ -184,7 +184,7 @@ require_once __DIR__ . '/includes/layout_top.php';
 <?php endforeach; ?>
 
 <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-    <h3 class="text-lg font-extrabold text-slate-900">Recent Approval History</h3>
+    <h3 class="text-lg font-extrabold text-slate-900">Recent Review History</h3>
     <div class="table-scroll mt-3">
         <table class="stack-table w-full min-w-[760px] text-sm">
             <thead>

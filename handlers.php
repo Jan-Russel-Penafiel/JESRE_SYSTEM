@@ -114,7 +114,7 @@ $upsertLowStockPurchaseRequest = static function (
                 $oldRequest,
                 $updatedRequest,
                 $actorId,
-                'Auto-updated purchase request due to low stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
+                'Auto-updated purchase request after Inventory forwarded a low-stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
                 'system'
             );
         }
@@ -149,11 +149,59 @@ $upsertLowStockPurchaseRequest = static function (
         null,
         $purchaseRequest,
         $actorId,
-        'Auto-created purchase request from low stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
+        'Auto-created purchase request after Inventory forwarded a low-stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
         'system'
     );
 
     return $purchaseRequestId;
+};
+
+$ensureInventoryRequestAvailability = static function (
+    PDO $db,
+    int $inventoryItemId,
+    float $requiredQty,
+    int $actorId,
+    string $missingSelectionMessage,
+    string $missingRecordMessage,
+    string $unapprovedMessage,
+    string $invalidQuantityMessage,
+    string $insufficientStockMessage,
+    string $reorderAlertReason
+) use ($upsertLowStockPurchaseRequest): void {
+    if ($inventoryItemId <= 0) {
+        throw new RuntimeException($missingSelectionMessage);
+    }
+
+    $inventoryStmt = $db->prepare('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE');
+    $inventoryStmt->execute([$inventoryItemId]);
+    $inventory = $inventoryStmt->fetch();
+    if (!$inventory) {
+        throw new RuntimeException($missingRecordMessage);
+    }
+
+    if (($inventory['status'] ?? '') !== 'approved') {
+        throw new RuntimeException($unapprovedMessage);
+    }
+
+    if ($requiredQty <= 0) {
+        throw new RuntimeException($invalidQuantityMessage);
+    }
+
+    $availableQty = (float) ($inventory['stock_qty'] ?? 0);
+    if ($availableQty < $requiredQty) {
+        throw new RuntimeException($insufficientStockMessage);
+    }
+
+    if ($availableQty <= (float) ($inventory['reorder_level'] ?? 0)) {
+        $upsertLowStockPurchaseRequest(
+            $db,
+            $inventoryItemId,
+            $actorId,
+            $reorderAlertReason,
+            null,
+            false
+        );
+    }
 };
 
 $ensureSalesFlavorAvailability = static function (
@@ -162,42 +210,39 @@ $ensureSalesFlavorAvailability = static function (
     float $quantity,
     float $stockDeductQty,
     int $actorId
-) use ($upsertLowStockPurchaseRequest): void {
-    if ($inventoryItemId <= 0) {
-        throw new RuntimeException('Please select an inventory item for the selected flavor.');
-    }
+) use ($ensureInventoryRequestAvailability): void {
+    $ensureInventoryRequestAvailability(
+        $db,
+        $inventoryItemId,
+        $quantity * $stockDeductQty,
+        $actorId,
+        'Please select an inventory item for the selected flavor.',
+        'Selected flavor is unavailable because the linked ingredient record does not exist.',
+        'Selected flavor is unavailable because the linked inventory ingredient is not approved yet.',
+        'Stock deduct quantity must be greater than zero.',
+        'Flavor unavailable for this order. Inventory Department has been alerted and Purchasing Department has been notified.',
+        'Inventory Department received a low-stock update from Sales while the flavor was still available.'
+    );
+};
 
-    $inventoryStmt = $db->prepare('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE');
-    $inventoryStmt->execute([$inventoryItemId]);
-    $inventory = $inventoryStmt->fetch();
-    if (!$inventory) {
-        throw new RuntimeException('Selected flavor is unavailable because the linked ingredient record does not exist.');
-    }
-
-    if (($inventory['status'] ?? '') !== 'approved') {
-        throw new RuntimeException('Selected flavor is unavailable because the linked inventory ingredient is not approved yet.');
-    }
-
-    $requiredQty = $quantity * $stockDeductQty;
-    if ($requiredQty <= 0) {
-        throw new RuntimeException('Stock deduct quantity must be greater than zero.');
-    }
-
-    $availableQty = (float) ($inventory['stock_qty'] ?? 0);
-    if ($availableQty < $requiredQty) {
-        throw new RuntimeException('Flavor unavailable for this order. A low-stock purchase request has been sent to Purchasing Department.');
-    }
-
-    if ($availableQty <= (float) ($inventory['reorder_level'] ?? 0)) {
-        $upsertLowStockPurchaseRequest(
-            $db,
-            $inventoryItemId,
-            $actorId,
-            'Flavor still available but already at/below reorder level during POS entry.',
-            null,
-            false
-        );
-    }
+$ensureProductionIngredientAvailability = static function (
+    PDO $db,
+    int $inventoryItemId,
+    float $ingredientUsedQty,
+    int $actorId
+) use ($ensureInventoryRequestAvailability): void {
+    $ensureInventoryRequestAvailability(
+        $db,
+        $inventoryItemId,
+        $ingredientUsedQty,
+        $actorId,
+        'Please select an inventory ingredient for this production request.',
+        'Selected production ingredient request cannot be completed because the linked inventory record does not exist.',
+        'Selected production ingredient request cannot be completed because the inventory ingredient is not approved yet.',
+        'Ingredient used quantity must be greater than zero.',
+        'Ingredient request cannot be fulfilled. Inventory Department has been alerted and Purchasing Department has been notified.',
+        'Inventory Department received a production ingredient request while the stock was already at/below reorder level.'
+    );
 };
 
 $deductInventory = static function (PDO $db, int $inventoryItemId, float $deductQuantity, int $actorId, string $reason) use ($upsertLowStockPurchaseRequest): void {
@@ -248,7 +293,7 @@ $deductInventory = static function (PDO $db, int $inventoryItemId, float $deduct
         $db,
         $inventoryItemId,
         $actorId,
-        'Low stock alert triggered after inventory deduction. ' . $reason,
+        'Inventory Department received a low-stock update after inventory deduction. ' . $reason,
         null,
         false
     );
@@ -472,7 +517,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
     $insertAccounting->execute([
         'Sales ' . $orderCode,
         $totalAmount,
-        'Auto-generated from sales approval flow.',
+        'Auto-generated from processed sales order flow.',
         $record['submitted_by'] ?? null,
         $approverId,
     ]);
@@ -650,6 +695,15 @@ try {
             );
         }
 
+        if ($department === 'production') {
+            $ensureProductionIngredientAvailability(
+                $pdo,
+                (int) ($data['inventory_item_id'] ?? 0),
+                (float) ($data['ingredient_used_qty'] ?? 0),
+                (int) ($user['id'] ?? 0)
+            );
+        }
+
         $pdo->beginTransaction();
 
         if ($department === 'purchasing') {
@@ -677,7 +731,7 @@ try {
             (int) ($user['id'] ?? 0),
             $realTimeSales
                 ? 'Record created and processed in real-time POS mode.'
-                : 'Record created and submitted for approval.',
+                : 'Record created and queued for manager review.',
             'user'
         );
 
@@ -700,7 +754,7 @@ try {
             'success',
             $realTimeSales
                 ? (department_label($department) . ' record created and processed in real-time.')
-                : (department_label($department) . ' record created and sent for GM approval.')
+                : (department_label($department) . ' record created and queued for manager review.')
         );
         $redirectToDepartment($department);
     }
@@ -786,6 +840,15 @@ try {
             );
         }
 
+        if ($department === 'production') {
+            $ensureProductionIngredientAvailability(
+                $pdo,
+                (int) ($data['inventory_item_id'] ?? 0),
+                (float) ($data['ingredient_used_qty'] ?? 0),
+                (int) ($user['id'] ?? 0)
+            );
+        }
+
         $pdo->beginTransaction();
 
         $record = $fetchRecord($pdo, $table, $id, true);
@@ -842,7 +905,7 @@ try {
             (int) ($user['id'] ?? 0),
             $realTimeSales
                 ? 'Record edited and re-processed in real-time POS mode.'
-                : 'Record edited and re-submitted for approval.',
+                : 'Record edited and re-queued for manager review.',
             'user'
         );
 
@@ -865,7 +928,7 @@ try {
             'success',
             $realTimeSales
                 ? 'Record updated and processed in real-time.'
-                : 'Record updated and re-submitted for approval.'
+                : 'Record updated and re-queued for manager review.'
         );
         $redirectToDepartment($department);
     }
@@ -957,7 +1020,7 @@ try {
                 $pdo,
                 (int) ($updatedRecord['id'] ?? 0),
                 (int) ($user['id'] ?? 0),
-                'Low stock update sent from approved inventory record #' . $id . '.',
+                'Inventory Department reviewed stock levels and sent a low-stock update from inventory record #' . $id . '.',
                 null,
                 false
             );
@@ -992,54 +1055,73 @@ try {
     }
 
     $errorMessage = $exception->getMessage();
-    $flavorUnavailablePrefix = 'Flavor unavailable for this order.';
+    $salesUnavailablePrefix = 'Flavor unavailable for this order.';
+    $productionUnavailablePrefix = 'Ingredient request cannot be fulfilled.';
 
     if (
-        $department === 'sales'
+        in_array($department, ['sales', 'production'], true)
         && in_array($action, ['create_record', 'edit_record'], true)
-        && strncmp($errorMessage, $flavorUnavailablePrefix, strlen($flavorUnavailablePrefix)) === 0
     ) {
-        $inventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
-        $quantity = (float) ($_POST['quantity'] ?? 0);
-        $stockDeductQty = (float) ($_POST['stock_deduct_qty'] ?? 0);
+        $isSalesEscalation = strncmp($errorMessage, $salesUnavailablePrefix, strlen($salesUnavailablePrefix)) === 0;
+        $isProductionEscalation = strncmp($errorMessage, $productionUnavailablePrefix, strlen($productionUnavailablePrefix)) === 0;
 
-        if ($inventoryItemId > 0 && $quantity > 0 && $stockDeductQty > 0) {
-            $requiredQty = $quantity * $stockDeductQty;
+        if ($isSalesEscalation || $isProductionEscalation) {
+            $inventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
+            $requiredQty = 0.0;
+            $purchaseReason = '';
+            $fallbackMessage = '';
+            $missingInventoryMessage = '';
 
-            try {
-                $inventoryStmt = $pdo->prepare('SELECT stock_qty FROM inventory_items WHERE id = ? LIMIT 1');
-                $inventoryStmt->execute([$inventoryItemId]);
-                $inventoryRow = $inventoryStmt->fetch() ?: null;
+            if ($department === 'sales') {
+                $quantity = (float) ($_POST['quantity'] ?? 0);
+                $stockDeductQty = (float) ($_POST['stock_deduct_qty'] ?? 0);
+                $requiredQty = $quantity * $stockDeductQty;
+                $purchaseReason = 'Inventory Department received a shortage alert from Sales POS. Required %s but only %s available.';
+                $fallbackMessage = 'Flavor unavailable for this order. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+                $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate the linked inventory item for auto-escalation.';
+            } else {
+                $requiredQty = (float) ($_POST['ingredient_used_qty'] ?? 0);
+                $purchaseReason = 'Inventory Department received a shortage alert from Production. Required %s but only %s available.';
+                $fallbackMessage = 'Ingredient request cannot be fulfilled. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+                $missingInventoryMessage = 'Ingredient request cannot be fulfilled. Unable to locate the linked inventory item for auto-escalation.';
+            }
 
-                if ($inventoryRow !== null) {
-                    $availableQty = (float) ($inventoryRow['stock_qty'] ?? 0);
-                    $shortageQty = max($requiredQty - $availableQty, 1);
+            if ($inventoryItemId > 0 && $requiredQty > 0) {
+                try {
+                    $inventoryStmt = $pdo->prepare('SELECT stock_qty FROM inventory_items WHERE id = ? LIMIT 1');
+                    $inventoryStmt->execute([$inventoryItemId]);
+                    $inventoryRow = $inventoryStmt->fetch() ?: null;
 
-                    $pdo->beginTransaction();
+                    if ($inventoryRow !== null) {
+                        $availableQty = (float) ($inventoryRow['stock_qty'] ?? 0);
+                        $shortageQty = max($requiredQty - $availableQty, 1);
 
-                    $purchaseRequestId = $upsertLowStockPurchaseRequest(
-                        $pdo,
-                        $inventoryItemId,
-                        (int) ($user['id'] ?? 0),
-                        'Flavor unavailable during POS entry. Required ' . number_format($requiredQty, 2) . ' but only ' . number_format($availableQty, 2) . ' available.',
-                        $shortageQty,
-                        true
-                    );
+                        $pdo->beginTransaction();
 
-                    $pdo->commit();
+                        $purchaseRequestId = $upsertLowStockPurchaseRequest(
+                            $pdo,
+                            $inventoryItemId,
+                            (int) ($user['id'] ?? 0),
+                            sprintf($purchaseReason, number_format($requiredQty, 2), number_format($availableQty, 2)),
+                            $shortageQty,
+                            true
+                        );
 
-                    if ($purchaseRequestId === null) {
-                        $errorMessage = 'Flavor unavailable for this order. Unable to auto-create a purchase request right now. Please notify Purchasing Department manually.';
+                        $pdo->commit();
+
+                        if ($purchaseRequestId === null) {
+                            $errorMessage = $fallbackMessage;
+                        }
+                    } else {
+                        $errorMessage = $missingInventoryMessage;
                     }
-                } else {
-                    $errorMessage = 'Flavor unavailable for this order. Unable to locate the linked inventory item for auto-escalation.';
-                }
-            } catch (Throwable $escalationException) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
+                } catch (Throwable $escalationException) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
 
-                $errorMessage = 'Flavor unavailable for this order. Unable to auto-create a purchase request right now. Please notify Purchasing Department manually.';
+                    $errorMessage = $fallbackMessage;
+                }
             }
         }
     }

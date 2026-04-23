@@ -654,7 +654,7 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
                 <?php endforeach; ?>
 
                 <?php if (($user['role'] ?? '') === ROLE_GENERAL_MANAGER): ?>
-                    <a href="approvals.php" class="block rounded-xl px-3 py-2 text-sm font-semibold <?= $navClass($activePage === 'approvals') ?>">Approval Queue</a>
+                    <a href="approvals.php" class="block rounded-xl px-3 py-2 text-sm font-semibold <?= $navClass($activePage === 'approvals') ?>">Review Queue</a>
                     <a href="reports.php" class="block rounded-xl px-3 py-2 text-sm font-semibold <?= $navClass($activePage === 'reports') ?>">Summary Reports</a>
                     <a href="audit_logs.php" class="block rounded-xl px-3 py-2 text-sm font-semibold <?= $navClass($activePage === 'audit_logs') ?>">Audit Logs</a>
                 <?php endif; ?>
@@ -682,7 +682,7 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
                         <?php endif; ?>
                     <?php endforeach; ?>
                     <?php if (($user['role'] ?? '') === ROLE_GENERAL_MANAGER): ?>
-                        <a href="approvals.php" class="rounded-full border px-3 py-1 text-xs font-semibold <?= $activePage === 'approvals' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300' ?>">Approvals</a>
+                        <a href="approvals.php" class="rounded-full border px-3 py-1 text-xs font-semibold <?= $activePage === 'approvals' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300' ?>">Review</a>
                         <a href="reports.php" class="rounded-full border px-3 py-1 text-xs font-semibold <?= $activePage === 'reports' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300' ?>">Reports</a>
                         <a href="audit_logs.php" class="rounded-full border px-3 py-1 text-xs font-semibold <?= $activePage === 'audit_logs' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300' ?>">Audit</a>
                     <?php endif; ?>

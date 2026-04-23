@@ -17,7 +17,7 @@ define(
     'REALTIME_SALES_MODE',
     $realTimeSalesEnv !== false
         ? in_array(strtolower((string) $realTimeSalesEnv), ['1', 'true', 'yes', 'on'], true)
-        : false
+        : true
 );
 
 define('DB_HOST', '127.0.0.1');
@@ -40,7 +40,15 @@ $DEPARTMENT_CONFIG = [
     'purchasing' => [
         'table' => 'purchase_requests',
         'title' => 'Purchasing Department',
-        'description' => '',
+        'description' => 'Buy ingredients before inventory runs out and keep supplier restocking aligned with low-stock alerts from Inventory.',
+        'create_button_label' => 'New Purchase Request',
+        'submit_label' => 'Save Purchase Request',
+        'edit_label' => 'Save Changes',
+        'workflow_points' => [
+            'Buy ingredients before stocks run out.',
+            'Use Inventory low-stock updates to prepare supplier purchases.',
+            'Approved purchase requests automatically restock linked inventory items.',
+        ],
         'primary_label' => 'request_code',
         'fields' => [
             ['name' => 'request_code', 'label' => 'Request Code (optional)', 'type' => 'text', 'required' => false],
@@ -64,7 +72,15 @@ $DEPARTMENT_CONFIG = [
     'inventory' => [
         'table' => 'inventory_items',
         'title' => 'Inventory Department',
-        'description' => '',
+        'description' => 'Receive ingredients, store them in the inventory database, auto-deduct stock on sales, and keep Purchasing updated on low stock.',
+        'create_button_label' => 'Receive Ingredients',
+        'submit_label' => 'Save Inventory Entry',
+        'edit_label' => 'Save Changes',
+        'workflow_points' => [
+            'Receive ingredients and store them in the inventory database.',
+            'Stock is auto-deducted when Sales or Production consume ingredients.',
+            'Low-stock updates trigger Purchasing requests before materials run out.',
+        ],
         'primary_label' => 'item_name',
         'fields' => [
             ['name' => 'item_name', 'label' => 'Item Name', 'type' => 'text', 'required' => true],
@@ -85,7 +101,15 @@ $DEPARTMENT_CONFIG = [
     'production' => [
         'table' => 'production_logs',
         'title' => 'Production Department',
-        'description' => '',
+        'description' => 'Request ingredients from Inventory, prepare beverages, and log ingredient usage so stock levels stay accurate.',
+        'create_button_label' => 'Log Production Request',
+        'submit_label' => 'Save Production Log',
+        'edit_label' => 'Save Changes',
+        'workflow_points' => [
+            'Request ingredients from Inventory before preparing beverages.',
+            'Record the quantity prepared and the ingredient usage per batch.',
+            'If ingredients are short, Inventory and Purchasing are alerted automatically.',
+        ],
         'primary_label' => 'beverage_name',
         'fields' => [
             ['name' => 'beverage_name', 'label' => 'Beverage Name', 'type' => 'text', 'required' => true],
@@ -105,7 +129,15 @@ $DEPARTMENT_CONFIG = [
     'sales' => [
         'table' => 'sales_orders',
         'title' => 'Sales Department',
-        'description' => '',
+        'description' => 'Assist the customer, confirm the order in POS, check flavor availability, process payment, issue the receipt, and update sales logs in real time.',
+        'create_button_label' => 'New POS Order',
+        'submit_label' => 'Save POS Order',
+        'edit_label' => 'Save POS Changes',
+        'workflow_points' => [
+            'Input the customer order directly into POS.',
+            'Flavor availability is validated before the order is saved.',
+            'Successful orders generate a digital sales order, payment log, receipt, and real-time sales update.',
+        ],
         'primary_label' => 'order_code',
         'fields' => [
             ['name' => 'order_code', 'label' => 'Order Code (optional)', 'type' => 'text', 'required' => false],
@@ -134,7 +166,15 @@ $DEPARTMENT_CONFIG = [
     'accounting' => [
         'table' => 'accounting_entries',
         'title' => 'Accounting Department',
-        'description' => '',
+        'description' => 'Record financial transactions, store digital logs, and use sales classifications to monitor high-sales and low-sales coffee performance.',
+        'create_button_label' => 'Record Transaction',
+        'submit_label' => 'Save Financial Log',
+        'edit_label' => 'Save Changes',
+        'workflow_points' => [
+            'Store digital financial logs for every recorded transaction.',
+            'Processed sales orders automatically create income entries.',
+            'Track high-sales and low-sales coffee for business analysis.',
+        ],
         'primary_label' => 'source',
         'fields' => [
             ['name' => 'entry_type', 'label' => 'Entry Type', 'type' => 'select', 'required' => true, 'options' => ['income' => 'Income', 'expense' => 'Expense']],
@@ -153,7 +193,15 @@ $DEPARTMENT_CONFIG = [
     'crm' => [
         'table' => 'crm_profiles',
         'title' => 'CRM Department',
-        'description' => '',
+        'description' => 'Track customer preferences and purchase history, then connect those records with high-sales and low-sales coffee behavior.',
+        'create_button_label' => 'Add CRM Record',
+        'submit_label' => 'Save CRM Record',
+        'edit_label' => 'Save Changes',
+        'workflow_points' => [
+            'Track customer preferences for future service and promotions.',
+            'Store customer purchase history from processed sales orders.',
+            'Use high-sales and low-sales coffee data to identify buying behavior.',
+        ],
         'primary_label' => 'customer_name',
         'fields' => [
             ['name' => 'customer_name', 'label' => 'Customer Name', 'type' => 'text', 'required' => true],
@@ -172,7 +220,15 @@ $DEPARTMENT_CONFIG = [
     'marketing' => [
         'table' => 'marketing_campaigns',
         'title' => 'Marketing Department',
-        'description' => '',
+        'description' => 'Analyze sales trends, create digital content, and focus promotions on low-sales coffee while monitoring market demand.',
+        'create_button_label' => 'Create Campaign',
+        'submit_label' => 'Save Campaign',
+        'edit_label' => 'Save Changes',
+        'workflow_points' => [
+            'Analyze trends from sales, CRM, and inventory data.',
+            'Create digital content and campaign plans from current demand.',
+            'Promote low-sales coffee while protecting low-stock items from overexposure.',
+        ],
         'primary_label' => 'campaign_name',
         'fields' => [
             ['name' => 'campaign_name', 'label' => 'Campaign Name', 'type' => 'text', 'required' => true],
