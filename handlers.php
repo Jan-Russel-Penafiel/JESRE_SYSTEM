@@ -223,6 +223,29 @@ $resolveInventoryUtilityItemId = static function (PDO $db, string $keyword): int
     return (int) ($likeStmt->fetchColumn() ?: 0);
 };
 
+$excludeUtilityIngredientIds = static function (PDO $db, array $inventoryItemIds) use ($resolveInventoryUtilityItemId): array {
+    $ids = normalize_inventory_item_ids($inventoryItemIds);
+    if ($ids === []) {
+        return [];
+    }
+
+    $excludedIds = [];
+    foreach (['cup', 'straw'] as $utilityKeyword) {
+        $utilityId = $resolveInventoryUtilityItemId($db, $utilityKeyword);
+        if ($utilityId > 0) {
+            $excludedIds[] = $utilityId;
+        }
+    }
+
+    if ($excludedIds === []) {
+        return $ids;
+    }
+
+    return array_values(array_filter($ids, static function (int $id) use ($excludedIds): bool {
+        return !in_array($id, $excludedIds, true);
+    }));
+};
+
 $ensureSalesFlavorAvailability = static function (
     PDO $db,
     array $inventoryItemIds,
@@ -788,7 +811,7 @@ try {
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
             $data['ingredient_used_qty'] = (float) ($data['ingredient_used_qty'] ?? 0);
-            $selectedProductionIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            $selectedProductionIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
             if ($selectedProductionIngredientIds === []) {
                 throw new RuntimeException('Please select ingredient items for this production request.');
             }
@@ -823,7 +846,7 @@ try {
                 throw new RuntimeException('Stock deduct quantity must be greater than zero.');
             }
 
-            $selectedSalesIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            $selectedSalesIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
             if ($selectedSalesIngredientIds === []) {
                 throw new RuntimeException('Please select ingredient items for this order.');
             }
@@ -970,7 +993,7 @@ try {
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
             $data['ingredient_used_qty'] = (float) ($data['ingredient_used_qty'] ?? 0);
-            $selectedProductionIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            $selectedProductionIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
             if ($selectedProductionIngredientIds === []) {
                 throw new RuntimeException('Please select ingredient items for this production request.');
             }
@@ -999,7 +1022,7 @@ try {
                 throw new RuntimeException('Per cup and per straw values cannot be negative.');
             }
 
-            $selectedSalesIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            $selectedSalesIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
             if ($selectedSalesIngredientIds === []) {
                 throw new RuntimeException('Please select ingredient items for this order.');
             }
@@ -1256,7 +1279,7 @@ try {
             || strpos($salesErrorLower, 'inventory department has been alerted and purchasing department has been notified') !== false;
 
         if (($isSalesEscalation || $isProductionEscalation) && $shouldAttemptSalesEscalation) {
-            $inventoryItemIds = normalize_inventory_item_ids($_POST['ingredient_item_ids'] ?? []);
+            $inventoryItemIds = $excludeUtilityIngredientIds($pdo, $_POST['ingredient_item_ids'] ?? []);
             if ($inventoryItemIds === []) {
                 $legacyInventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
                 if ($legacyInventoryItemId > 0) {

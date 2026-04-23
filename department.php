@@ -112,6 +112,7 @@ $rows = $stmt->fetchAll();
 
 $allInventoryItems = [];
 $approvedInventoryItems = [];
+$approvedIngredientItems = [];
 $inventoryMap = [];
 $approvedCrmProfiles = [];
 $createButtonLabel = (string) ($config['create_button_label'] ?? 'Create Record');
@@ -126,6 +127,12 @@ if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
             $approvedInventoryItems[] = $item;
         }
     }
+
+    $approvedIngredientItems = array_values(array_filter($approvedInventoryItems, static function (array $item): bool {
+        $itemName = strtolower(trim((string) ($item['item_name'] ?? '')));
+
+        return !in_array($itemName, ['cup', 'straw'], true);
+    }));
 }
 
 if ($department === 'sales') {
@@ -366,7 +373,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                             </label>
 
                             <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                                <?php foreach ($approvedInventoryItems as $item): ?>
+                                <?php foreach ($approvedIngredientItems as $item): ?>
                                     <?php $inputId = $selectionGroupId . '-' . (int) $item['id']; ?>
                                     <label for="<?= e($inputId) ?>" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
                                         <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($fieldName) ?>[]" value="<?= e((string) $item['id']) ?>" data-select-item="<?= e($selectionGroupId) ?>" class="h-4 w-4 rounded border-slate-300 text-slate-900">
@@ -375,7 +382,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                                 <?php endforeach; ?>
                             </div>
 
-                            <?php if ($approvedInventoryItems === []): ?>
+                            <?php if ($approvedIngredientItems === []): ?>
                                 <p class="mt-2 text-xs font-semibold text-rose-600">No approved inventory ingredients available.</p>
                             <?php endif; ?>
                         </div>
@@ -528,7 +535,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                                     </label>
 
                                     <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                                        <?php foreach ($approvedInventoryItems as $item): ?>
+                                        <?php foreach ($approvedIngredientItems as $item): ?>
                                             <?php
                                             $inputId = $selectionGroupId . '-' . (int) $item['id'];
                                             $isChecked = in_array((int) $item['id'], $selectedInventoryValues, true);
@@ -540,7 +547,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                                         <?php endforeach; ?>
                                     </div>
 
-                                    <?php if ($approvedInventoryItems === []): ?>
+                                    <?php if ($approvedIngredientItems === []): ?>
                                         <p class="mt-2 text-xs font-semibold text-rose-600">No approved inventory ingredients available.</p>
                                     <?php endif; ?>
                                 </div>
