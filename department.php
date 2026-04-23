@@ -113,18 +113,48 @@ $rows = $stmt->fetchAll();
 $allInventoryItems = [];
 $approvedInventoryItems = [];
 $inventoryMap = [];
+$approvedCrmProfiles = [];
 $createButtonLabel = (string) ($config['create_button_label'] ?? 'Create Record');
 $submitLabel = (string) ($config['submit_label'] ?? 'Save Record');
 $editLabel = (string) ($config['edit_label'] ?? 'Save Changes');
 
 if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
-    $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
+    $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, per_cup_qty, per_straw_qty, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
     foreach ($allInventoryItems as $item) {
         $inventoryMap[(int) $item['id']] = $item['item_name'] . ' (' . number_format((float) $item['stock_qty'], 2) . ' ' . $item['unit'] . ')';
         if (($item['status'] ?? '') === 'approved') {
             $approvedInventoryItems[] = $item;
         }
     }
+}
+
+if ($department === 'sales') {
+    $approvedCrmProfiles = $pdo->query('SELECT id, customer_name FROM crm_profiles WHERE status = \'approved\' ORDER BY customer_name ASC')->fetchAll() ?? [];
+}
+
+$formatIngredientSelection = static function ($value, ?array $record = null) use ($inventoryMap): string {
+    $ids = normalize_inventory_item_ids($value);
+    if ($ids === [] && $record !== null) {
+        $ids = inventory_item_ids_from_record($record);
+    }
+
+    return format_inventory_item_selection($ids, $inventoryMap);
+};
+
+$formatInventoryItemLabel = static function (array $item): string {
+    $itemName = (string) ($item['item_name'] ?? '-');
+    $stockQty = number_format((float) ($item['stock_qty'] ?? 0), 2);
+    $unit = (string) ($item['unit'] ?? '');
+    $perCupQty = number_format((float) ($item['per_cup_qty'] ?? 0), 2);
+    $perStrawQty = number_format((float) ($item['per_straw_qty'] ?? 0), 2);
+
+    return $itemName . ' (' . $stockQty . ' ' . $unit . ') | Cup: ' . $perCupQty . ' | Straw: ' . $perStrawQty;
+};
+
+$jsPdfVersion = '';
+if ($department === 'sales') {
+    $jsPdfFile = __DIR__ . '/assets/vendor/jspdf/jspdf.umd.min.js';
+    $jsPdfVersion = is_file($jsPdfFile) ? (string) filemtime($jsPdfFile) : '1';
 }
 
 $pageTitle = $config['title'];
@@ -199,6 +229,25 @@ require_once __DIR__ . '/includes/layout_top.php';
                     $rowId = (int) $row['id'];
                     $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
                     $isApproved = ($row['status'] ?? '') === 'approved';
+                    $receiptPayload = null;
+                    if ($department === 'sales') {
+                        $receiptPayload = [
+                            'order_code' => (string) ($row['order_code'] ?? '-'),
+                            'receipt_no' => (string) ($row['receipt_no'] ?? '-'),
+                            'customer_name' => (string) ($row['customer_name'] ?? '-'),
+                            'beverage_name' => (string) ($row['beverage_name'] ?? '-'),
+                            'quantity' => (float) ($row['quantity'] ?? 0),
+                            'unit_price' => (float) ($row['unit_price'] ?? 0),
+                            'total_amount' => (float) ($row['total_amount'] ?? 0),
+                            'payment_method' => (string) ($row['payment_method'] ?? '-'),
+                            'payment_reference' => (string) ($row['payment_reference'] ?? ''),
+                            'paid_at' => (string) format_table_value('paid_at', $row['paid_at'] ?? null),
+                            'stock_deduct_qty' => (float) ($row['stock_deduct_qty'] ?? 0),
+                            'per_cup_qty' => (float) ($row['per_cup_qty'] ?? 0),
+                            'per_straw_qty' => (float) ($row['per_straw_qty'] ?? 0),
+                            'ingredients' => $formatIngredientSelection($row['ingredient_item_ids'] ?? null, $row),
+                        ];
+                    }
                     ?>
                     <tr class="border-t border-slate-100">
                         <td class="py-2 pr-4 font-bold">#<?= e((string) $rowId) ?></td>
@@ -208,6 +257,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                                     <span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) $row[$column])) ?>"><?= e(strtoupper((string) $row[$column])) ?></span>
                                 <?php elseif ($column === 'inventory_item_id'): ?>
                                     <?= e($inventoryMap[(int) ($row[$column] ?? 0)] ?? '-') ?>
+                                <?php elseif ($column === 'ingredient_item_ids'): ?>
+                                    <?= e($formatIngredientSelection($row[$column] ?? null, $row)) ?>
                                 <?php else: ?>
                                     <?= e(format_table_value($column, $row[$column] ?? null)) ?>
                                 <?php endif; ?>
@@ -218,6 +269,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                         <td class="py-2">
                             <div class="flex flex-wrap gap-2">
                                 <button type="button" onclick="openModal('view-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50">View</button>
+                                <?php if ($department === 'sales' && $receiptPayload !== null): ?>
+                                    <button type="button" data-receipt="<?= e((string) json_encode($receiptPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?>" onclick="printSalesReceiptFromButton(this)" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100">Print Receipt</button>
+                                <?php endif; ?>
                                 <?php if ($canManage): ?>
                                     <button type="button" onclick="openModal('edit-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>">Edit</button>
                                     <button type="button" onclick="openModal('delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100 <?= $isApproved ? 'opacity-50 cursor-not-allowed pointer-events-none' : '' ?>">Delete</button>
@@ -267,7 +321,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                 $fieldName = $field['name'];
                 $fieldType = $field['type'];
                 $required = (bool) ($field['required'] ?? false);
-                $fieldClass = $fieldType === 'textarea' ? 'md:col-span-2' : '';
+                $fieldClass = in_array($fieldType, ['textarea', 'inventory_multi_select'], true) ? 'md:col-span-2' : '';
                 ?>
                 <div class="<?= e($fieldClass) ?>">
                     <label class="block text-sm font-semibold text-slate-700"><?= e($field['label']) ?><?= $required ? ' *' : '' ?></label>
@@ -285,9 +339,44 @@ require_once __DIR__ . '/includes/layout_top.php';
                         <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
                             <option value="">Select inventory item</option>
                             <?php foreach ($approvedInventoryItems as $item): ?>
-                                <option value="<?= e((string) $item['id']) ?>"><?= e($item['item_name']) ?> (<?= e(number_format((float) $item['stock_qty'], 2)) ?> <?= e($item['unit']) ?>)</option>
+                                <option value="<?= e((string) $item['id']) ?>"><?= e($formatInventoryItemLabel($item)) ?></option>
                             <?php endforeach; ?>
                         </select>
+                    <?php elseif ($fieldType === 'crm_select'): ?>
+                        <?php if ($approvedCrmProfiles === []): ?>
+                            <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                                <p class="text-xs font-semibold text-rose-600">No approved CRM profiles available. Create a CRM profile first before creating sales orders.</p>
+                            </div>
+                        <?php else: ?>
+                            <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
+                                <option value="">Select CRM customer</option>
+                                <?php foreach ($approvedCrmProfiles as $profile): ?>
+                                    <option value="<?= e((string) $profile['customer_name']) ?>"><?= e((string) $profile['customer_name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php endif; ?>
+                    <?php elseif ($fieldType === 'inventory_multi_select'): ?>
+                        <?php $selectionGroupId = 'create-' . $fieldName; ?>
+                        <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                            <label class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+                                <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-slate-900" data-select-all="<?= e($selectionGroupId) ?>">
+                                <span>Select all ingredients</span>
+                            </label>
+
+                            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                                <?php foreach ($approvedInventoryItems as $item): ?>
+                                    <?php $inputId = $selectionGroupId . '-' . (int) $item['id']; ?>
+                                    <label for="<?= e($inputId) ?>" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                                        <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($fieldName) ?>[]" value="<?= e((string) $item['id']) ?>" data-select-item="<?= e($selectionGroupId) ?>" class="h-4 w-4 rounded border-slate-300 text-slate-900">
+                                        <span><?= e($formatInventoryItemLabel($item)) ?></span>
+                                    </label>
+                                <?php endforeach; ?>
+                            </div>
+
+                            <?php if ($approvedInventoryItems === []): ?>
+                                <p class="mt-2 text-xs font-semibold text-rose-600">No approved inventory ingredients available.</p>
+                            <?php endif; ?>
+                        </div>
                     <?php else: ?>
                         <?php
                         $inputType = $fieldType === 'number' ? 'number' : ($fieldType === 'date' ? 'date' : 'text');
@@ -326,6 +415,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                     $value = $row[$name] ?? null;
                     if ($name === 'inventory_item_id') {
                         $value = $inventoryMap[(int) ($row[$name] ?? 0)] ?? '-';
+                    } elseif ($name === 'ingredient_item_ids') {
+                        $value = $formatIngredientSelection($row[$name] ?? null, $row);
                     }
                     ?>
                     <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -384,7 +475,13 @@ require_once __DIR__ . '/includes/layout_top.php';
                         $fieldType = $field['type'];
                         $required = (bool) ($field['required'] ?? false);
                         $value = $row[$fieldName] ?? '';
-                        $fieldClass = $fieldType === 'textarea' ? 'md:col-span-2' : '';
+                        $fieldClass = in_array($fieldType, ['textarea', 'inventory_multi_select'], true) ? 'md:col-span-2' : '';
+                        $selectedInventoryValues = [];
+                        if ($fieldType === 'inventory_multi_select') {
+                            $selectedInventoryValues = $fieldName === 'ingredient_item_ids'
+                                ? inventory_item_ids_from_record($row)
+                                : normalize_inventory_item_ids($value);
+                        }
                         ?>
                         <div class="<?= e($fieldClass) ?>">
                             <label class="block text-sm font-semibold text-slate-700"><?= e($field['label']) ?><?= $required ? ' *' : '' ?></label>
@@ -402,9 +499,47 @@ require_once __DIR__ . '/includes/layout_top.php';
                                 <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
                                     <option value="">Select inventory item</option>
                                     <?php foreach ($approvedInventoryItems as $item): ?>
-                                        <option value="<?= e((string) $item['id']) ?>" <?= (int) $value === (int) $item['id'] ? 'selected' : '' ?>><?= e($item['item_name']) ?> (<?= e(number_format((float) $item['stock_qty'], 2)) ?> <?= e($item['unit']) ?>)</option>
+                                        <option value="<?= e((string) $item['id']) ?>" <?= (int) $value === (int) $item['id'] ? 'selected' : '' ?>><?= e($formatInventoryItemLabel($item)) ?></option>
                                     <?php endforeach; ?>
                                 </select>
+                            <?php elseif ($fieldType === 'crm_select'): ?>
+                                <?php if ($approvedCrmProfiles === []): ?>
+                                    <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                                        <p class="text-xs font-semibold text-rose-600">No approved CRM profiles available.</p>
+                                    </div>
+                                <?php else: ?>
+                                    <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
+                                        <option value="">Select CRM customer</option>
+                                        <?php foreach ($approvedCrmProfiles as $profile): ?>
+                                            <option value="<?= e((string) $profile['customer_name']) ?>" <?= (string) $value === (string) $profile['customer_name'] ? 'selected' : '' ?>><?= e((string) $profile['customer_name']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <?php endif; ?>
+                            <?php elseif ($fieldType === 'inventory_multi_select'): ?>
+                                <?php $selectionGroupId = 'edit-' . $rowId . '-' . $fieldName; ?>
+                                <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                                    <label class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+                                        <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-slate-900" data-select-all="<?= e($selectionGroupId) ?>">
+                                        <span>Select all ingredients</span>
+                                    </label>
+
+                                    <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                                        <?php foreach ($approvedInventoryItems as $item): ?>
+                                            <?php
+                                            $inputId = $selectionGroupId . '-' . (int) $item['id'];
+                                            $isChecked = in_array((int) $item['id'], $selectedInventoryValues, true);
+                                            ?>
+                                            <label for="<?= e($inputId) ?>" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                                                <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($fieldName) ?>[]" value="<?= e((string) $item['id']) ?>" data-select-item="<?= e($selectionGroupId) ?>" class="h-4 w-4 rounded border-slate-300 text-slate-900" <?= $isChecked ? 'checked' : '' ?>>
+                                                <span><?= e($formatInventoryItemLabel($item)) ?></span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+
+                                    <?php if ($approvedInventoryItems === []): ?>
+                                        <p class="mt-2 text-xs font-semibold text-rose-600">No approved inventory ingredients available.</p>
+                                    <?php endif; ?>
+                                </div>
                             <?php else: ?>
                                 <?php
                                 $inputType = $fieldType === 'number' ? 'number' : ($fieldType === 'date' ? 'date' : 'text');
@@ -439,5 +574,86 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
     <?php endif; ?>
 <?php endforeach; ?>
+
+<?php if ($department === 'sales'): ?>
+    <script src="assets/vendor/jspdf/jspdf.umd.min.js?v=<?= e($jsPdfVersion) ?>"></script>
+    <script>
+        function printSalesReceiptFromButton(button) {
+            const rawPayload = button ? (button.getAttribute('data-receipt') || '{}') : '{}';
+            let payload = {};
+
+            try {
+                payload = JSON.parse(rawPayload);
+            } catch (error) {
+                alert('Unable to parse receipt data. Please refresh and try again.');
+                return;
+            }
+
+            const jsPdfNamespace = window.jspdf;
+            if (!jsPdfNamespace || !jsPdfNamespace.jsPDF) {
+                alert('jsPDF failed to load. Please refresh and try again.');
+                return;
+            }
+
+            const doc = new jsPdfNamespace.jsPDF({ unit: 'pt', format: [226.77, 600] });
+            let y = 24;
+            const left = 14;
+            const maxWidth = 196;
+            const lineHeight = 11;
+
+            const writeWrappedLine = function (label, value, bold) {
+                const text = label + ': ' + (value || '-');
+                const lines = doc.splitTextToSize(text, maxWidth);
+                doc.setFont('helvetica', bold ? 'bold' : 'normal');
+                doc.setFontSize(9);
+                lines.forEach(function (line) {
+                    doc.text(line, left, y);
+                    y += lineHeight;
+                });
+            };
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(12);
+            doc.text('Don Macchiatos', left, y);
+            y += 14;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.text('Sales Receipt', left, y);
+            y += 12;
+            doc.text('----------------------------------------------', left, y);
+            y += 12;
+
+            writeWrappedLine('Receipt No', payload.receipt_no || '-', true);
+            writeWrappedLine('Order Code', payload.order_code || '-', false);
+            writeWrappedLine('Customer', payload.customer_name || '-', false);
+            writeWrappedLine('Beverage', payload.beverage_name || '-', false);
+            writeWrappedLine('Ingredients', payload.ingredients || '-', false);
+            writeWrappedLine('Qty x Unit Price', Number(payload.quantity || 0).toFixed(0) + ' x PHP ' + Number(payload.unit_price || 0).toFixed(2), false);
+            writeWrappedLine('Stock Deduct Per Order', Number(payload.stock_deduct_qty || 0).toFixed(2), false);
+            writeWrappedLine('Per Cup Value', Number(payload.per_cup_qty || 0).toFixed(2), false);
+            writeWrappedLine('Per Straw Value', Number(payload.per_straw_qty || 0).toFixed(2), false);
+            writeWrappedLine('Payment Method', payload.payment_method || '-', false);
+            if (payload.payment_reference) {
+                writeWrappedLine('Payment Ref', payload.payment_reference, false);
+            }
+            writeWrappedLine('Paid At', payload.paid_at || '-', false);
+
+            y += 2;
+            doc.text('----------------------------------------------', left, y);
+            y += 12;
+
+            writeWrappedLine('Total Amount', 'PHP ' + Number(payload.total_amount || 0).toFixed(2), true);
+
+            y += 6;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.text('Thank you for your order!', left, y);
+
+            const filenameBase = (payload.receipt_no || payload.order_code || 'receipt').toString().replace(/\s+/g, '-');
+            doc.save(filenameBase + '.pdf');
+        }
+    </script>
+<?php endif; ?>
 
 <?php require_once __DIR__ . '/includes/layout_bottom.php'; ?>

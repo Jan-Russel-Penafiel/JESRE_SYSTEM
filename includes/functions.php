@@ -242,7 +242,7 @@ function format_table_value(string $column, $value): string
         return '-';
     }
 
-    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'amount', 'total_amount', 'total_spent', 'requested_qty', 'quoted_unit_cost', 'estimated_total'], true)) {
+    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'per_cup_qty', 'per_straw_qty', 'amount', 'total_amount', 'total_spent', 'requested_qty', 'quoted_unit_cost', 'estimated_total'], true)) {
         return number_format((float) $value, 2);
     }
 
@@ -259,6 +259,83 @@ function format_table_value(string $column, $value): string
     }
 
     return (string) $value;
+}
+
+function normalize_inventory_item_ids($raw): array
+{
+    if ($raw === null || $raw === '') {
+        return [];
+    }
+
+    if (is_string($raw)) {
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $raw = $decoded;
+        } else {
+            $raw = preg_split('/\s*,\s*/', trim($raw), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+    }
+
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    $unique = [];
+    foreach ($raw as $value) {
+        if (is_int($value) && $value > 0) {
+            $unique[$value] = $value;
+            continue;
+        }
+
+        if (is_string($value) && ctype_digit($value)) {
+            $id = (int) $value;
+            if ($id > 0) {
+                $unique[$id] = $id;
+            }
+        }
+    }
+
+    return array_values($unique);
+}
+
+function inventory_item_ids_to_json(array $ids): ?string
+{
+    $normalized = normalize_inventory_item_ids($ids);
+    if ($normalized === []) {
+        return null;
+    }
+
+    return json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function inventory_item_ids_from_record(array $record): array
+{
+    $ids = normalize_inventory_item_ids($record['ingredient_item_ids'] ?? null);
+    if ($ids !== []) {
+        return $ids;
+    }
+
+    $legacyId = (int) ($record['inventory_item_id'] ?? 0);
+    if ($legacyId > 0) {
+        return [$legacyId];
+    }
+
+    return [];
+}
+
+function format_inventory_item_selection($raw, array $inventoryMap): string
+{
+    $ids = normalize_inventory_item_ids($raw);
+    if ($ids === []) {
+        return '-';
+    }
+
+    $labels = [];
+    foreach ($ids as $id) {
+        $labels[] = $inventoryMap[$id] ?? ('Unknown item #' . $id);
+    }
+
+    return implode(', ', $labels);
 }
 
 function next_order_code(PDO $pdo): string
@@ -342,6 +419,40 @@ function validate_department_input(array $departmentConfig, array $source): arra
             }
 
             $data[$name] = (int) $raw;
+            continue;
+        }
+
+        if ($type === 'inventory_multi_select') {
+            $ids = normalize_inventory_item_ids($raw);
+
+            if ($required && $ids === []) {
+                $errors[] = $field['label'] . ' is required.';
+                continue;
+            }
+
+            $data[$name] = $ids;
+            continue;
+        }
+
+        if ($type === 'crm_select') {
+            $customerName = trim((string) $raw);
+
+            if ($customerName === '' && !$required) {
+                $data[$name] = null;
+                continue;
+            }
+
+            if ($customerName === '' && $required) {
+                $errors[] = $field['label'] . ' is required.';
+                continue;
+            }
+
+            if (strlen($customerName) > 120) {
+                $errors[] = $field['label'] . ' must be 120 characters or less.';
+                continue;
+            }
+
+            $data[$name] = $customerName;
             continue;
         }
 

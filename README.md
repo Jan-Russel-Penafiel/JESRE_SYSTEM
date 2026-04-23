@@ -25,13 +25,16 @@ Manager review remains available as an oversight layer for pending non-POS recor
   - Automatic updates
 - Production Department
   - Prepare beverages
-  - Input usage
+  - Input usage with multi-ingredient selection (with select-all support)
 - Sales Department
   - Process customer orders directly in POS
+  - Select multiple ingredient items for each order
+  - Set per-cup and per-straw consumption values
   - Process POS payment method (cash/card/digital)
   - Generate digital order code and receipt number
   - Automate sales recording in real time
   - Inventory auto-deducted when the order is processed
+  - Print receipt from Sales actions using jsPDF
 - Accounting Department
   - Record financial transactions
   - Generate financial reports
@@ -56,7 +59,8 @@ Manager review remains available as an oversight layer for pending non-POS recor
 ## Automation Rules
 
 On Sales processing (real-time POS mode is now enabled by default):
-- Inventory is automatically deducted (`quantity * stock_deduct_qty`).
+- Inventory is automatically deducted for all selected ingredient items (`quantity * stock_deduct_qty`).
+- Additional utility stock deduction is applied for Cup and Straw using `quantity * per_cup_qty` and `quantity * per_straw_qty`.
 - Accounting income record is auto-created.
 - CRM profile is auto-created/updated.
 - CRM purchase history is auto-recorded.

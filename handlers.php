@@ -204,45 +204,135 @@ $ensureInventoryRequestAvailability = static function (
     }
 };
 
+$resolveInventoryUtilityItemId = static function (PDO $db, string $keyword): int {
+    $normalizedKeyword = strtolower(trim($keyword));
+    if ($normalizedKeyword === '') {
+        return 0;
+    }
+
+    $exactStmt = $db->prepare('SELECT id FROM inventory_items WHERE status = ? AND LOWER(item_name) = ? ORDER BY id ASC LIMIT 1');
+    $exactStmt->execute(['approved', $normalizedKeyword]);
+    $exactId = (int) ($exactStmt->fetchColumn() ?: 0);
+    if ($exactId > 0) {
+        return $exactId;
+    }
+
+    $likeStmt = $db->prepare('SELECT id FROM inventory_items WHERE status = ? AND LOWER(item_name) LIKE ? ORDER BY id ASC LIMIT 1');
+    $likeStmt->execute(['approved', '%' . $normalizedKeyword . '%']);
+
+    return (int) ($likeStmt->fetchColumn() ?: 0);
+};
+
 $ensureSalesFlavorAvailability = static function (
     PDO $db,
-    int $inventoryItemId,
+    array $inventoryItemIds,
     float $quantity,
     float $stockDeductQty,
+    float $perCupQty,
+    float $perStrawQty,
     int $actorId
-) use ($ensureInventoryRequestAvailability): void {
-    $ensureInventoryRequestAvailability(
-        $db,
-        $inventoryItemId,
-        $quantity * $stockDeductQty,
-        $actorId,
-        'Please select an inventory item for the selected flavor.',
-        'Selected flavor is unavailable because the linked ingredient record does not exist.',
-        'Selected flavor is unavailable because the linked inventory ingredient is not approved yet.',
-        'Stock deduct quantity must be greater than zero.',
-        'Flavor unavailable for this order. Inventory Department has been alerted and Purchasing Department has been notified.',
-        'Inventory Department received a low-stock update from Sales while the flavor was still available.'
-    );
+) use ($ensureInventoryRequestAvailability, $resolveInventoryUtilityItemId): void {
+    $selectedIngredientIds = normalize_inventory_item_ids($inventoryItemIds);
+    if ($selectedIngredientIds === []) {
+        throw new RuntimeException('Please select ingredient items for this order.');
+    }
+
+    if ($quantity <= 0) {
+        throw new RuntimeException('Quantity must be greater than zero.');
+    }
+
+    if ($stockDeductQty <= 0) {
+        throw new RuntimeException('Stock deduct quantity must be greater than zero.');
+    }
+
+    if ($perCupQty < 0 || $perStrawQty < 0) {
+        throw new RuntimeException('Per cup and per straw values cannot be negative.');
+    }
+
+    $ingredientRequiredQty = $quantity * $stockDeductQty;
+    foreach ($selectedIngredientIds as $inventoryItemId) {
+        $ensureInventoryRequestAvailability(
+            $db,
+            $inventoryItemId,
+            $ingredientRequiredQty,
+            $actorId,
+            'Please select ingredient items for this order.',
+            'Selected flavor is unavailable because the linked ingredient record does not exist.',
+            'Selected flavor is unavailable because the linked inventory ingredient is not approved yet.',
+            'Stock deduct quantity must be greater than zero.',
+            'Flavor unavailable for this order. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Inventory Department received a low-stock update from Sales while the flavor was still available.'
+        );
+    }
+
+    $cupRequiredQty = $quantity * $perCupQty;
+    if ($cupRequiredQty > 0) {
+        $cupInventoryItemId = $resolveInventoryUtilityItemId($db, 'cup');
+        if ($cupInventoryItemId <= 0) {
+            throw new RuntimeException('Flavor unavailable for this order. Cup inventory item is not configured or approved.');
+        }
+
+        $ensureInventoryRequestAvailability(
+            $db,
+            $cupInventoryItemId,
+            $cupRequiredQty,
+            $actorId,
+            'Flavor unavailable for this order. Cup inventory item is required.',
+            'Flavor unavailable for this order. Cup inventory item does not exist.',
+            'Flavor unavailable for this order. Cup inventory item is not approved yet.',
+            'Per cup value must be greater than or equal to zero.',
+            'Flavor unavailable for this order. Cup stock is insufficient. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Inventory Department received a low-stock update from Sales cup consumption while stock was still available.'
+        );
+    }
+
+    $strawRequiredQty = $quantity * $perStrawQty;
+    if ($strawRequiredQty > 0) {
+        $strawInventoryItemId = $resolveInventoryUtilityItemId($db, 'straw');
+        if ($strawInventoryItemId <= 0) {
+            throw new RuntimeException('Flavor unavailable for this order. Straw inventory item is not configured or approved.');
+        }
+
+        $ensureInventoryRequestAvailability(
+            $db,
+            $strawInventoryItemId,
+            $strawRequiredQty,
+            $actorId,
+            'Flavor unavailable for this order. Straw inventory item is required.',
+            'Flavor unavailable for this order. Straw inventory item does not exist.',
+            'Flavor unavailable for this order. Straw inventory item is not approved yet.',
+            'Per straw value must be greater than or equal to zero.',
+            'Flavor unavailable for this order. Straw stock is insufficient. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Inventory Department received a low-stock update from Sales straw consumption while stock was still available.'
+        );
+    }
 };
 
 $ensureProductionIngredientAvailability = static function (
     PDO $db,
-    int $inventoryItemId,
+    array $inventoryItemIds,
     float $ingredientUsedQty,
     int $actorId
 ) use ($ensureInventoryRequestAvailability): void {
-    $ensureInventoryRequestAvailability(
-        $db,
-        $inventoryItemId,
-        $ingredientUsedQty,
-        $actorId,
-        'Please select an inventory ingredient for this production request.',
-        'Selected production ingredient request cannot be completed because the linked inventory record does not exist.',
-        'Selected production ingredient request cannot be completed because the inventory ingredient is not approved yet.',
-        'Ingredient used quantity must be greater than zero.',
-        'Ingredient request cannot be fulfilled. Inventory Department has been alerted and Purchasing Department has been notified.',
-        'Inventory Department received a production ingredient request while the stock was already at/below reorder level.'
-    );
+    $selectedIngredientIds = normalize_inventory_item_ids($inventoryItemIds);
+    if ($selectedIngredientIds === []) {
+        throw new RuntimeException('Please select ingredient items for this production request.');
+    }
+
+    foreach ($selectedIngredientIds as $inventoryItemId) {
+        $ensureInventoryRequestAvailability(
+            $db,
+            $inventoryItemId,
+            $ingredientUsedQty,
+            $actorId,
+            'Please select ingredient items for this production request.',
+            'Selected production ingredient request cannot be completed because the linked inventory record does not exist.',
+            'Selected production ingredient request cannot be completed because the inventory ingredient is not approved yet.',
+            'Ingredient used quantity must be greater than zero.',
+            'Ingredient request cannot be fulfilled. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Inventory Department received a production ingredient request while the stock was already at/below reorder level.'
+        );
+    }
 };
 
 $deductInventory = static function (PDO $db, int $inventoryItemId, float $deductQuantity, int $actorId, string $reason) use ($upsertLowStockPurchaseRequest): void {
@@ -440,7 +530,7 @@ $syncAutomatedMarketingCampaign = static function (PDO $db, array $salesRecord, 
     $approvalLogStmt->execute(['marketing', $campaignId, 'approved', 'Auto-approved marketing campaign from sales automation flow.', $approverId]);
 };
 
-$applyApprovalAutomation = static function (PDO $db, string $dept, array $record, int $approverId) use ($deductInventory, $fetchRecord, $syncAutomatedMarketingCampaign): void {
+$applyApprovalAutomation = static function (PDO $db, string $dept, array $record, int $approverId) use ($deductInventory, $fetchRecord, $resolveInventoryUtilityItemId, $syncAutomatedMarketingCampaign): void {
     if ($dept === 'purchasing') {
         $inventoryItemId = (int) ($record['inventory_item_id'] ?? 0);
         $requestedQty = (float) ($record['requested_qty'] ?? 0);
@@ -482,13 +572,23 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
     }
 
     if ($dept === 'production') {
-        $deductInventory(
-            $db,
-            (int) ($record['inventory_item_id'] ?? 0),
-            (float) ($record['ingredient_used_qty'] ?? 0),
-            $approverId,
-            'Auto-deducted ingredient usage from approved production log #' . (int) $record['id']
-        );
+        $selectedIngredientIds = inventory_item_ids_from_record($record);
+        $ingredientUsedQty = (float) ($record['ingredient_used_qty'] ?? 0);
+
+        if ($selectedIngredientIds === [] || $ingredientUsedQty <= 0) {
+            throw new RuntimeException('Production approval requires ingredient selections and ingredient used quantity.');
+        }
+
+        foreach ($selectedIngredientIds as $inventoryItemId) {
+            $deductInventory(
+                $db,
+                $inventoryItemId,
+                $ingredientUsedQty,
+                $approverId,
+                'Auto-deducted ingredient usage from approved production log #' . (int) $record['id']
+            );
+        }
+
         return;
     }
 
@@ -498,15 +598,54 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
 
     $quantity = (float) ($record['quantity'] ?? 0);
     $deductPerOrder = (float) ($record['stock_deduct_qty'] ?? 0);
-    $totalDeduction = $quantity * $deductPerOrder;
+    $selectedIngredientIds = inventory_item_ids_from_record($record);
+    $totalIngredientDeduction = $quantity * $deductPerOrder;
 
-    $deductInventory(
-        $db,
-        (int) ($record['inventory_item_id'] ?? 0),
-        $totalDeduction,
-        $approverId,
-        'Auto-deducted stock from approved sales order #' . (int) $record['id']
-    );
+    if ($selectedIngredientIds === [] || $totalIngredientDeduction <= 0) {
+        throw new RuntimeException('Sales approval requires ingredient selections and stock deduct quantity.');
+    }
+
+    foreach ($selectedIngredientIds as $inventoryItemId) {
+        $deductInventory(
+            $db,
+            $inventoryItemId,
+            $totalIngredientDeduction,
+            $approverId,
+            'Auto-deducted stock from approved sales order #' . (int) $record['id']
+        );
+    }
+
+    $cupRequiredQty = $quantity * (float) ($record['per_cup_qty'] ?? 0);
+    if ($cupRequiredQty > 0) {
+        $cupInventoryItemId = $resolveInventoryUtilityItemId($db, 'cup');
+        if ($cupInventoryItemId <= 0) {
+            throw new RuntimeException('Cup inventory item is not configured or approved.');
+        }
+
+        $deductInventory(
+            $db,
+            $cupInventoryItemId,
+            $cupRequiredQty,
+            $approverId,
+            'Auto-deducted cup usage from approved sales order #' . (int) $record['id']
+        );
+    }
+
+    $strawRequiredQty = $quantity * (float) ($record['per_straw_qty'] ?? 0);
+    if ($strawRequiredQty > 0) {
+        $strawInventoryItemId = $resolveInventoryUtilityItemId($db, 'straw');
+        if ($strawInventoryItemId <= 0) {
+            throw new RuntimeException('Straw inventory item is not configured or approved.');
+        }
+
+        $deductInventory(
+            $db,
+            $strawInventoryItemId,
+            $strawRequiredQty,
+            $approverId,
+            'Auto-deducted straw usage from approved sales order #' . (int) $record['id']
+        );
+    }
 
     $orderCode = (string) ($record['order_code'] ?? ('ORDER-' . (int) $record['id']));
     $totalAmount = (float) ($record['total_amount'] ?? 0);
@@ -643,8 +782,19 @@ try {
             }
         }
 
+        $selectedProductionIngredientIds = [];
+        $selectedSalesIngredientIds = [];
+
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
+            $data['ingredient_used_qty'] = (float) ($data['ingredient_used_qty'] ?? 0);
+            $selectedProductionIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            if ($selectedProductionIngredientIds === []) {
+                throw new RuntimeException('Please select ingredient items for this production request.');
+            }
+
+            $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedProductionIngredientIds);
+            $data['inventory_item_id'] = $selectedProductionIngredientIds[0];
         }
 
         if ($department === 'purchasing') {
@@ -660,7 +810,26 @@ try {
         if ($department === 'sales') {
             $data['quantity'] = (int) ($data['quantity'] ?? 0);
             $data['unit_price'] = (float) ($data['unit_price'] ?? 0);
+            $data['per_cup_qty'] = (float) ($data['per_cup_qty'] ?? 0);
+            $data['per_straw_qty'] = (float) ($data['per_straw_qty'] ?? 0);
             $data['stock_deduct_qty'] = (float) ($data['stock_deduct_qty'] ?? 0);
+            if ($data['stock_deduct_qty'] <= 0) {
+                $data['stock_deduct_qty'] = $data['per_cup_qty'] + $data['per_straw_qty'];
+            }
+            if ($data['per_cup_qty'] < 0 || $data['per_straw_qty'] < 0) {
+                throw new RuntimeException('Per cup and per straw values cannot be negative.');
+            }
+            if ($data['stock_deduct_qty'] <= 0) {
+                throw new RuntimeException('Stock deduct quantity must be greater than zero.');
+            }
+
+            $selectedSalesIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            if ($selectedSalesIngredientIds === []) {
+                throw new RuntimeException('Please select ingredient items for this order.');
+            }
+
+            $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
+            $data['inventory_item_id'] = $selectedSalesIngredientIds[0];
             $data['order_code'] = ($data['order_code'] ?? null) ?: next_order_code($pdo);
             $data['payment_method'] = (string) ($data['payment_method'] ?? 'cash');
             $data['payment_reference'] = $data['payment_reference'] ?? null;
@@ -688,9 +857,11 @@ try {
         if ($department === 'sales') {
             $ensureSalesFlavorAvailability(
                 $pdo,
-                (int) ($data['inventory_item_id'] ?? 0),
+                $selectedSalesIngredientIds,
                 (float) ($data['quantity'] ?? 0),
                 (float) ($data['stock_deduct_qty'] ?? 0),
+                (float) ($data['per_cup_qty'] ?? 0),
+                (float) ($data['per_straw_qty'] ?? 0),
                 (int) ($user['id'] ?? 0)
             );
         }
@@ -698,7 +869,7 @@ try {
         if ($department === 'production') {
             $ensureProductionIngredientAvailability(
                 $pdo,
-                (int) ($data['inventory_item_id'] ?? 0),
+                $selectedProductionIngredientIds,
                 (float) ($data['ingredient_used_qty'] ?? 0),
                 (int) ($user['id'] ?? 0)
             );
@@ -797,8 +968,19 @@ try {
             }
         }
 
+        $selectedProductionIngredientIds = [];
+        $selectedSalesIngredientIds = [];
+
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
+            $data['ingredient_used_qty'] = (float) ($data['ingredient_used_qty'] ?? 0);
+            $selectedProductionIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            if ($selectedProductionIngredientIds === []) {
+                throw new RuntimeException('Please select ingredient items for this production request.');
+            }
+
+            $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedProductionIngredientIds);
+            $data['inventory_item_id'] = $selectedProductionIngredientIds[0];
         }
 
         if ($department === 'purchasing') {
@@ -815,6 +997,19 @@ try {
             $data['quantity'] = (int) ($data['quantity'] ?? 0);
             $data['unit_price'] = (float) ($data['unit_price'] ?? 0);
             $data['stock_deduct_qty'] = (float) ($data['stock_deduct_qty'] ?? 0);
+            $data['per_cup_qty'] = (float) ($data['per_cup_qty'] ?? 0);
+            $data['per_straw_qty'] = (float) ($data['per_straw_qty'] ?? 0);
+            if ($data['per_cup_qty'] < 0 || $data['per_straw_qty'] < 0) {
+                throw new RuntimeException('Per cup and per straw values cannot be negative.');
+            }
+
+            $selectedSalesIngredientIds = normalize_inventory_item_ids($data['ingredient_item_ids'] ?? []);
+            if ($selectedSalesIngredientIds === []) {
+                throw new RuntimeException('Please select ingredient items for this order.');
+            }
+
+            $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
+            $data['inventory_item_id'] = $selectedSalesIngredientIds[0];
             $data['order_code'] = ($data['order_code'] ?? null) ?: (string) ($record['order_code'] ?? next_order_code($pdo));
             $data['payment_method'] = (string) ($data['payment_method'] ?? ($record['payment_method'] ?? 'cash'));
             $data['payment_reference'] = $data['payment_reference'] ?? null;
@@ -833,9 +1028,11 @@ try {
         if ($department === 'sales') {
             $ensureSalesFlavorAvailability(
                 $pdo,
-                (int) ($data['inventory_item_id'] ?? 0),
+                $selectedSalesIngredientIds,
                 (float) ($data['quantity'] ?? 0),
                 (float) ($data['stock_deduct_qty'] ?? 0),
+                (float) ($data['per_cup_qty'] ?? 0),
+                (float) ($data['per_straw_qty'] ?? 0),
                 (int) ($user['id'] ?? 0)
             );
         }
@@ -843,7 +1040,7 @@ try {
         if ($department === 'production') {
             $ensureProductionIngredientAvailability(
                 $pdo,
-                (int) ($data['inventory_item_id'] ?? 0),
+                $selectedProductionIngredientIds,
                 (float) ($data['ingredient_used_qty'] ?? 0),
                 (int) ($user['id'] ?? 0)
             );
@@ -1065,8 +1262,20 @@ try {
         $isSalesEscalation = strncmp($errorMessage, $salesUnavailablePrefix, strlen($salesUnavailablePrefix)) === 0;
         $isProductionEscalation = strncmp($errorMessage, $productionUnavailablePrefix, strlen($productionUnavailablePrefix)) === 0;
 
-        if ($isSalesEscalation || $isProductionEscalation) {
-            $inventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
+        $salesErrorLower = strtolower($errorMessage);
+        $shouldAttemptSalesEscalation = !$isSalesEscalation
+            || strpos($salesErrorLower, 'stock is insufficient') !== false
+            || strpos($salesErrorLower, 'inventory department has been alerted and purchasing department has been notified') !== false;
+
+        if (($isSalesEscalation || $isProductionEscalation) && $shouldAttemptSalesEscalation) {
+            $inventoryItemIds = normalize_inventory_item_ids($_POST['ingredient_item_ids'] ?? []);
+            if ($inventoryItemIds === []) {
+                $legacyInventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
+                if ($legacyInventoryItemId > 0) {
+                    $inventoryItemIds = [$legacyInventoryItemId];
+                }
+            }
+
             $requiredQty = 0.0;
             $purchaseReason = '';
             $fallbackMessage = '';
@@ -1075,29 +1284,60 @@ try {
             if ($department === 'sales') {
                 $quantity = (float) ($_POST['quantity'] ?? 0);
                 $stockDeductQty = (float) ($_POST['stock_deduct_qty'] ?? 0);
-                $requiredQty = $quantity * $stockDeductQty;
-                $purchaseReason = 'Inventory Department received a shortage alert from Sales POS. Required %s but only %s available.';
-                $fallbackMessage = 'Flavor unavailable for this order. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
-                $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate the linked inventory item for auto-escalation.';
+                $perCupQty = (float) ($_POST['per_cup_qty'] ?? 0);
+                $perStrawQty = (float) ($_POST['per_straw_qty'] ?? 0);
+                if ($stockDeductQty <= 0) {
+                    $stockDeductQty = $perCupQty + $perStrawQty;
+                }
+                $errorLower = $salesErrorLower;
+
+                if (strpos($errorLower, 'cup stock is insufficient') !== false) {
+                    $cupInventoryItemId = $resolveInventoryUtilityItemId($pdo, 'cup');
+                    $inventoryItemIds = $cupInventoryItemId > 0 ? [$cupInventoryItemId] : [];
+                    $requiredQty = $quantity * $perCupQty;
+                    $purchaseReason = 'Inventory Department received a shortage alert from Sales POS cup consumption. Required %s but only %s available.';
+                    $fallbackMessage = 'Flavor unavailable for this order. Cup stock alert reached Inventory, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+                    $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate linked cup inventory item for auto-escalation.';
+                } elseif (strpos($errorLower, 'straw stock is insufficient') !== false) {
+                    $strawInventoryItemId = $resolveInventoryUtilityItemId($pdo, 'straw');
+                    $inventoryItemIds = $strawInventoryItemId > 0 ? [$strawInventoryItemId] : [];
+                    $requiredQty = $quantity * $perStrawQty;
+                    $purchaseReason = 'Inventory Department received a shortage alert from Sales POS straw consumption. Required %s but only %s available.';
+                    $fallbackMessage = 'Flavor unavailable for this order. Straw stock alert reached Inventory, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+                    $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate linked straw inventory item for auto-escalation.';
+                } else {
+                    $requiredQty = $quantity * $stockDeductQty;
+                    $purchaseReason = 'Inventory Department received a shortage alert from Sales POS. Required %s but only %s available.';
+                    $fallbackMessage = 'Flavor unavailable for this order. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+                    $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate linked inventory ingredient items for auto-escalation.';
+                }
             } else {
                 $requiredQty = (float) ($_POST['ingredient_used_qty'] ?? 0);
                 $purchaseReason = 'Inventory Department received a shortage alert from Production. Required %s but only %s available.';
                 $fallbackMessage = 'Ingredient request cannot be fulfilled. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
-                $missingInventoryMessage = 'Ingredient request cannot be fulfilled. Unable to locate the linked inventory item for auto-escalation.';
+                $missingInventoryMessage = 'Ingredient request cannot be fulfilled. Unable to locate linked inventory ingredient items for auto-escalation.';
             }
 
-            if ($inventoryItemId > 0 && $requiredQty > 0) {
+            if ($inventoryItemIds !== [] && $requiredQty > 0) {
                 try {
-                    $inventoryStmt = $pdo->prepare('SELECT stock_qty FROM inventory_items WHERE id = ? LIMIT 1');
-                    $inventoryStmt->execute([$inventoryItemId]);
-                    $inventoryRow = $inventoryStmt->fetch() ?: null;
+                    $pdo->beginTransaction();
 
-                    if ($inventoryRow !== null) {
+                    $createdEscalation = false;
+
+                    foreach ($inventoryItemIds as $inventoryItemId) {
+                        $inventoryStmt = $pdo->prepare('SELECT stock_qty FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
+                        $inventoryStmt->execute([$inventoryItemId]);
+                        $inventoryRow = $inventoryStmt->fetch() ?: null;
+                        if ($inventoryRow === null) {
+                            continue;
+                        }
+
                         $availableQty = (float) ($inventoryRow['stock_qty'] ?? 0);
+                        if ($availableQty >= $requiredQty) {
+                            continue;
+                        }
+
                         $shortageQty = max($requiredQty - $availableQty, 1);
-
-                        $pdo->beginTransaction();
-
                         $purchaseRequestId = $upsertLowStockPurchaseRequest(
                             $pdo,
                             $inventoryItemId,
@@ -1107,12 +1347,14 @@ try {
                             true
                         );
 
-                        $pdo->commit();
-
-                        if ($purchaseRequestId === null) {
-                            $errorMessage = $fallbackMessage;
+                        if ($purchaseRequestId !== null) {
+                            $createdEscalation = true;
                         }
-                    } else {
+                    }
+
+                    $pdo->commit();
+
+                    if (!$createdEscalation) {
                         $errorMessage = $missingInventoryMessage;
                     }
                 } catch (Throwable $escalationException) {
@@ -1122,6 +1364,8 @@ try {
 
                     $errorMessage = $fallbackMessage;
                 }
+            } else {
+                $errorMessage = $missingInventoryMessage;
             }
         }
     }

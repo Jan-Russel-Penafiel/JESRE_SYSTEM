@@ -13,6 +13,15 @@ foreach ($inventoryRows as $inventoryRow) {
     $inventoryMap[(int) $inventoryRow['id']] = $inventoryRow['item_name'] . ' (' . number_format((float) $inventoryRow['stock_qty'], 2) . ' ' . $inventoryRow['unit'] . ')';
 }
 
+$formatIngredientSelection = static function ($value, array $record) use ($inventoryMap): string {
+    $ids = normalize_inventory_item_ids($value);
+    if ($ids === []) {
+        $ids = inventory_item_ids_from_record($record);
+    }
+
+    return format_inventory_item_selection($ids, $inventoryMap);
+};
+
 foreach (department_configs() as $departmentKey => $departmentConfig) {
     $table = $departmentConfig['table'];
     $primaryLabel = $departmentConfig['primary_label'];
@@ -115,6 +124,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                     $value = $record[$name] ?? null;
                     if ($name === 'inventory_item_id') {
                         $value = $inventoryMap[(int) ($record[$name] ?? 0)] ?? '-';
+                    } elseif ($name === 'ingredient_item_ids') {
+                        $value = $formatIngredientSelection($record[$name] ?? null, $record);
                     }
                     ?>
                     <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">

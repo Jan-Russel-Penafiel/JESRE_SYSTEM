@@ -170,10 +170,66 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             });
         }
 
+        function syncIngredientSelectAllState(groupId) {
+            const selectAll = document.querySelector('[data-select-all="' + groupId + '"]');
+            if (!selectAll) {
+                return;
+            }
+
+            const items = Array.from(document.querySelectorAll('[data-select-item="' + groupId + '"]'));
+            if (!items.length) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+                return;
+            }
+
+            const checkedCount = items.filter(function (item) { return item.checked; }).length;
+            selectAll.checked = checkedCount > 0 && checkedCount === items.length;
+            selectAll.indeterminate = checkedCount > 0 && checkedCount < items.length;
+        }
+
+        function initializeIngredientSelectionControls() {
+            document.querySelectorAll('[data-select-all]').forEach(function (toggle) {
+                if (toggle.dataset.selectAllInitialized === '1') {
+                    return;
+                }
+
+                const groupId = toggle.getAttribute('data-select-all') || '';
+                if (groupId === '') {
+                    return;
+                }
+
+                toggle.dataset.selectAllInitialized = '1';
+
+                toggle.addEventListener('change', function () {
+                    document.querySelectorAll('[data-select-item="' + groupId + '"]').forEach(function (checkbox) {
+                        checkbox.checked = toggle.checked;
+                    });
+
+                    syncIngredientSelectAllState(groupId);
+                });
+
+                document.querySelectorAll('[data-select-item="' + groupId + '"]').forEach(function (checkbox) {
+                    if (checkbox.dataset.selectItemInitialized === '1') {
+                        return;
+                    }
+
+                    checkbox.dataset.selectItemInitialized = '1';
+                    checkbox.addEventListener('change', function () {
+                        syncIngredientSelectAllState(groupId);
+                    });
+                });
+
+                syncIngredientSelectAllState(groupId);
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('table.stack-table').forEach(function (table) {
                 applyStackTableLabels(table);
             });
+
+            initializeIngredientSelectionControls();
         });
 
         window.addEventListener('keydown', function (event) {

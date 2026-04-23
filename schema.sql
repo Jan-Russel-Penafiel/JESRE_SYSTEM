@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     unit VARCHAR(30) NOT NULL,
     stock_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
     reorder_level DECIMAL(12,2) NOT NULL DEFAULT 0,
+    per_cup_qty DECIMAL(12,2) NOT NULL DEFAULT 1,
+    per_straw_qty DECIMAL(12,2) NOT NULL DEFAULT 1,
     notes TEXT NULL,
     status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
     submitted_by INT UNSIGNED NULL,
@@ -68,6 +70,7 @@ CREATE TABLE IF NOT EXISTS production_logs (
     beverage_name VARCHAR(120) NOT NULL,
     quantity_prepared INT UNSIGNED NOT NULL,
     inventory_item_id INT UNSIGNED NULL,
+    ingredient_item_ids TEXT NULL,
     ingredient_used_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
     notes TEXT NULL,
     status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
@@ -96,7 +99,10 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     receipt_no VARCHAR(60) NULL UNIQUE,
     paid_at DATETIME NULL,
     inventory_item_id INT UNSIGNED NULL,
+    ingredient_item_ids TEXT NULL,
     stock_deduct_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+    per_cup_qty DECIMAL(12,2) NOT NULL DEFAULT 1,
+    per_straw_qty DECIMAL(12,2) NOT NULL DEFAULT 1,
     total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     notes TEXT NULL,
     status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
@@ -248,3 +254,11 @@ WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Milk');
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
 SELECT 'Caramel Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Caramel Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Cup', 'pcs', 1000.00, 200.00, 'Utility cup stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Cup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Straw', 'pcs', 1000.00, 200.00, 'Utility straw stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Straw');
