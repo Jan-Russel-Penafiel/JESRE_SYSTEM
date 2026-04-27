@@ -289,9 +289,12 @@ CREATE TABLE `inventory_items` (
 INSERT INTO `inventory_items` (`id`, `item_name`, `unit`, `stock_qty`, `reorder_level`, `per_cup_qty`, `per_straw_qty`, `notes`, `status`, `submitted_by`, `approved_by`, `approval_note`, `approved_at`, `created_at`, `updated_at`) VALUES
 (1, 'Coffee Beans', 'kg', 65905.00, 20.00, 1.00, 1.00, 'Primary espresso beans', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24'),
 (2, 'Milk', 'liter', 65905.00, 30.00, 1.00, 1.00, 'Fresh milk stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24'),
-(3, 'Caramel Syrup', 'bottle', 1297136.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24'),
+(3, 'Caramel Syrup', 'bottle', 1297348.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24'),
 (6, 'Cup', 'pcs', 831.00, 200.00, 1.00, 1.00, 'Utility cup stock for Sales POS deductions', 'approved', NULL, NULL, NULL, '2026-04-23 13:00:38', '2026-04-23 13:00:38', '2026-04-23 13:01:24'),
-(7, 'Straw', 'pcs', 831.00, 200.00, 1.00, 1.00, 'Utility straw stock for Sales POS deductions', 'approved', NULL, NULL, NULL, '2026-04-23 13:00:38', '2026-04-23 13:00:38', '2026-04-23 13:01:24');
+(7, 'Straw', 'pcs', 831.00, 200.00, 1.00, 1.00, 'Utility straw stock for Sales POS deductions', 'approved', NULL, NULL, NULL, '2026-04-23 13:00:38', '2026-04-23 13:00:38', '2026-04-23 13:01:24'),
+(8, 'Vanilla Syrup', 'bottle', 30.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24'),
+(9, 'Hazelnut Syrup', 'bottle', 30.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24'),
+(10, 'Mocha Syrup', 'bottle', 30.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-23 13:01:24');
 
 -- --------------------------------------------------------
 
@@ -624,7 +627,7 @@ ALTER TABLE `crm_purchase_history`
 -- AUTO_INCREMENT for table `inventory_items`
 --
 ALTER TABLE `inventory_items`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `marketing_campaigns`

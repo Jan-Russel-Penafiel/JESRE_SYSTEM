@@ -252,8 +252,20 @@ SELECT 'Milk', 'liter', 90.00, 30.00, 'Fresh milk stock', 'approved', @inv_head_
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Milk');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Caramel Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Caramel Syrup', 'bottle', 1297348.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Caramel Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Vanilla Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Vanilla Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Hazelnut Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Hazelnut Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Mocha Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Mocha Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
 SELECT 'Cup', 'pcs', 1000.00, 200.00, 'Utility cup stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()

@@ -20,12 +20,16 @@ $table = $config['table'];
 
 $search = trim((string) ($_GET['q'] ?? ''));
 $statusFilter = (string) ($_GET['status'] ?? 'all');
+$entryTypeFilter = (string) ($_GET['entry_type'] ?? 'all');
 $dateFrom = (string) ($_GET['from'] ?? '');
 $dateTo = (string) ($_GET['to'] ?? '');
+$rangeFilter = (string) ($_GET['range'] ?? 'all');
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = (int) ($_GET['per_page'] ?? 10);
 $allowedPerPage = [10, 25, 50, 100];
 $statusOptions = ['all', 'pending', 'approved', 'rejected'];
+$entryTypeOptions = ['all', 'income', 'expense'];
+$rangeOptions = ['all', 'daily', 'weekly', 'monthly'];
 
 if (!in_array($perPage, $allowedPerPage, true)) {
     $perPage = 10;
@@ -33,6 +37,14 @@ if (!in_array($perPage, $allowedPerPage, true)) {
 
 if (!in_array($statusFilter, $statusOptions, true)) {
     $statusFilter = 'all';
+}
+
+if (!in_array($entryTypeFilter, $entryTypeOptions, true)) {
+    $entryTypeFilter = 'all';
+}
+
+if (!in_array($rangeFilter, $rangeOptions, true)) {
+    $rangeFilter = 'all';
 }
 
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
@@ -43,6 +55,17 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
     $dateTo = '';
 }
 
+if ($rangeFilter === 'daily') {
+    $dateFrom = date('Y-m-d');
+    $dateTo = $dateFrom;
+} elseif ($rangeFilter === 'weekly') {
+    $dateFrom = date('Y-m-d', strtotime('monday this week'));
+    $dateTo = date('Y-m-d', strtotime('sunday this week'));
+} elseif ($rangeFilter === 'monthly') {
+    $dateFrom = date('Y-m-01');
+    $dateTo = date('Y-m-t');
+}
+
 $where = [];
 $params = [];
 
@@ -51,7 +74,12 @@ if ($statusFilter !== 'all') {
     $params[] = $statusFilter;
 }
 
-if ($search !== '') {
+if ($department === 'accounting' && $entryTypeFilter !== 'all') {
+    $where[] = 't.entry_type = ?';
+    $params[] = $entryTypeFilter;
+}
+
+if ($search !== '' && $department !== 'accounting') {
     $searchColumns = array_values(array_unique(array_map(static function (array $field): string {
         return $field['name'];
     }, $config['fields'])));
@@ -114,15 +142,32 @@ $allInventoryItems = [];
 $approvedInventoryItems = [];
 $approvedIngredientItems = [];
 $inventoryMap = [];
+$ingredientSelectionMap = [];
 $approvedCrmProfiles = [];
 $createButtonLabel = (string) ($config['create_button_label'] ?? 'Create Record');
 $submitLabel = (string) ($config['submit_label'] ?? 'Save Record');
 $editLabel = (string) ($config['edit_label'] ?? 'Save Changes');
+$isInventoryDepartment = $department === 'inventory';
+$isAccountingDepartment = $department === 'accounting';
+$isCrmDepartment = $department === 'crm';
+$showCreateModal = !$isInventoryDepartment && !$isAccountingDepartment && !$isCrmDepartment;
+$showApplyResetButtons = !$isAccountingDepartment && !$isCrmDepartment;
+$autoSubmitFilters = $isAccountingDepartment || $isCrmDepartment;
 
 if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
     $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, per_cup_qty, per_straw_qty, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
     foreach ($allInventoryItems as $item) {
-        $inventoryMap[(int) $item['id']] = $item['item_name'] . ' (' . number_format((float) $item['stock_qty'], 2) . ' ' . $item['unit'] . ')';
+        $itemId = (int) ($item['id'] ?? 0);
+        $itemName = (string) ($item['item_name'] ?? '-');
+        $stockQty = number_format((float) ($item['stock_qty'] ?? 0), 2);
+        $unit = (string) ($item['unit'] ?? '');
+        $perCupQty = number_format((float) ($item['per_cup_qty'] ?? 0), 2);
+        $perStrawQty = number_format((float) ($item['per_straw_qty'] ?? 0), 2);
+
+        $baseLabel = $itemName . ' (' . $stockQty . ' ' . $unit . ')';
+        $inventoryMap[$itemId] = $baseLabel;
+        $ingredientSelectionMap[$itemId] = $baseLabel . ' | Cup: ' . $perCupQty . ' | Straw: ' . $perStrawQty;
+
         if (($item['status'] ?? '') === 'approved') {
             $approvedInventoryItems[] = $item;
         }
@@ -133,29 +178,79 @@ if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
 
         return !in_array($itemName, ['cup', 'straw'], true);
     }));
+
+    $deduplicatedIngredientItems = [];
+    foreach ($approvedIngredientItems as $item) {
+        $itemNameKey = strtolower(trim((string) ($item['item_name'] ?? '')));
+        if ($itemNameKey === '') {
+            continue;
+        }
+
+        if (!isset($deduplicatedIngredientItems[$itemNameKey])) {
+            $deduplicatedIngredientItems[$itemNameKey] = $item;
+            continue;
+        }
+
+        $existingItem = $deduplicatedIngredientItems[$itemNameKey];
+        $existingStockQty = (float) ($existingItem['stock_qty'] ?? 0);
+        $currentStockQty = (float) ($item['stock_qty'] ?? 0);
+        $existingItemId = (int) ($existingItem['id'] ?? 0);
+        $currentItemId = (int) ($item['id'] ?? 0);
+
+        if ($currentStockQty > $existingStockQty || ($currentStockQty === $existingStockQty && $currentItemId > $existingItemId)) {
+            $deduplicatedIngredientItems[$itemNameKey] = $item;
+        }
+    }
+
+    $approvedIngredientItems = array_values($deduplicatedIngredientItems);
+
+    $priorityFlavorOrder = [
+        'caramel syrup' => 0,
+        'hazelnut syrup' => 1,
+        'mocha syrup' => 2,
+    ];
+
+    usort($approvedIngredientItems, static function (array $left, array $right) use ($priorityFlavorOrder): int {
+        $leftName = strtolower(trim((string) ($left['item_name'] ?? '')));
+        $rightName = strtolower(trim((string) ($right['item_name'] ?? '')));
+
+        $leftPriority = $priorityFlavorOrder[$leftName] ?? 99;
+        $rightPriority = $priorityFlavorOrder[$rightName] ?? 99;
+        if ($leftPriority !== $rightPriority) {
+            return $leftPriority <=> $rightPriority;
+        }
+
+        return strnatcasecmp((string) ($left['item_name'] ?? ''), (string) ($right['item_name'] ?? ''));
+    });
 }
 
 if ($department === 'sales') {
     $approvedCrmProfiles = $pdo->query('SELECT id, customer_name FROM crm_profiles WHERE status = \'approved\' ORDER BY customer_name ASC')->fetchAll() ?? [];
 }
 
-$formatIngredientSelection = static function ($value, ?array $record = null) use ($inventoryMap): string {
+$formatIngredientSelection = static function ($value, ?array $record = null) use ($ingredientSelectionMap): string {
     $ids = normalize_inventory_item_ids($value);
     if ($ids === [] && $record !== null) {
         $ids = inventory_item_ids_from_record($record);
     }
 
-    return format_inventory_item_selection($ids, $inventoryMap);
+    return format_inventory_item_selection($ids, $ingredientSelectionMap);
 };
 
-$formatInventoryItemLabel = static function (array $item): string {
+$formatInventoryItemLabel = static function (array $item, bool $showCupStrawUsage = true): string {
     $itemName = (string) ($item['item_name'] ?? '-');
     $stockQty = number_format((float) ($item['stock_qty'] ?? 0), 2);
     $unit = (string) ($item['unit'] ?? '');
+
+    $label = $itemName . ' (' . $stockQty . ' ' . $unit . ')';
+    if (!$showCupStrawUsage) {
+        return $label;
+    }
+
     $perCupQty = number_format((float) ($item['per_cup_qty'] ?? 0), 2);
     $perStrawQty = number_format((float) ($item['per_straw_qty'] ?? 0), 2);
 
-    return $itemName . ' (' . $stockQty . ' ' . $unit . ') | Cup: ' . $perCupQty . ' | Straw: ' . $perStrawQty;
+    return $label . ' | Cup: ' . $perCupQty . ' | Straw: ' . $perStrawQty;
 };
 
 $jsPdfVersion = '';
@@ -172,15 +267,27 @@ require_once __DIR__ . '/includes/layout_top.php';
 <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <form method="get" class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <input type="hidden" name="dept" value="<?= e($department) ?>">
+        <input type="hidden" name="range" value="<?= e($rangeFilter) ?>">
 
-        <div class="md:col-span-2 xl:col-span-2">
-            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Search</label>
-            <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search records" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
-        </div>
+        <?php if ($isAccountingDepartment): ?>
+            <div class="md:col-span-2 xl:col-span-2">
+                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Type</label>
+                <select name="entry_type" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
+                    <?php foreach ($entryTypeOptions as $option): ?>
+                        <option value="<?= e($option) ?>" <?= $entryTypeFilter === $option ? 'selected' : '' ?>><?= e(ucfirst($option)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        <?php else: ?>
+            <div class="md:col-span-2 xl:col-span-2">
+                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Search</label>
+                <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search records" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            </div>
+        <?php endif; ?>
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Status</label>
-            <select name="status" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            <select name="status" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
                 <?php foreach ($statusOptions as $option): ?>
                     <option value="<?= e($option) ?>" <?= $statusFilter === $option ? 'selected' : '' ?>><?= e(ucfirst($option)) ?></option>
                 <?php endforeach; ?>
@@ -189,17 +296,17 @@ require_once __DIR__ . '/includes/layout_top.php';
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">From</label>
-            <input type="date" name="from" value="<?= e($dateFrom) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            <input type="date" name="from" value="<?= e($dateFrom) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
         </div>
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">To</label>
-            <input type="date" name="to" value="<?= e($dateTo) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            <input type="date" name="to" value="<?= e($dateTo) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
         </div>
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Rows</label>
-            <select name="per_page" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            <select name="per_page" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
                 <?php foreach ($allowedPerPage as $size): ?>
                     <option value="<?= e((string) $size) ?>" <?= $perPage === $size ? 'selected' : '' ?>><?= e((string) $size) ?></option>
                 <?php endforeach; ?>
@@ -207,15 +314,25 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
 
         <div class="md:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+                <?php foreach (['daily' => 'Daily', 'weekly' => 'Weekly', 'monthly' => 'Monthly'] as $rangeKey => $rangeLabel): ?>
+                    <a href="department.php?<?= e(query_with($_GET, ['dept' => $department, 'range' => $rangeKey, 'page' => 1], ['from', 'to'])) ?>" class="rounded-xl px-3 py-1.5 text-xs font-bold <?= $rangeFilter === $rangeKey ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50' ?>"><?= e($rangeLabel) ?></a>
+                <?php endforeach; ?>
+            </div>
             <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
-                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
-                <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
-                <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($createButtonLabel) ?></button>
+                <?php if ($showApplyResetButtons): ?>
+                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
+                    <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
+                <?php endif; ?>
+                <?php if ($showCreateModal): ?>
+                    <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($createButtonLabel) ?></button>
+                <?php endif; ?>
                 <p class="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">Total results: <?= e((string) $totalRows) ?></p>
             </div>
         </div>
     </form>
 
+    <?php if (!$isAccountingDepartment): ?>
     <div class="table-scroll mt-4">
         <table class="stack-table w-full min-w-[980px] text-sm">
             <thead>
@@ -234,9 +351,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <?php foreach ($rows as $row): ?>
                     <?php
                     $rowId = (int) $row['id'];
-                    $inventoryItemName = strtolower(trim((string) ($row['item_name'] ?? '')));
-                    $isInventoryCupOrStraw = $department === 'inventory' && in_array($inventoryItemName, ['cup', 'straw'], true);
-                    $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0) || $isInventoryCupOrStraw);
+                    $canManage = $department !== 'inventory'
+                        && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
+                            || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
                     $isApproved = ($row['status'] ?? '') === 'approved';
                     $receiptPayload = null;
                     if ($department === 'sales') {
@@ -251,10 +368,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                             'payment_method' => (string) ($row['payment_method'] ?? '-'),
                             'payment_reference' => (string) ($row['payment_reference'] ?? ''),
                             'paid_at' => (string) format_table_value('paid_at', $row['paid_at'] ?? null),
-                            'stock_deduct_qty' => (float) ($row['stock_deduct_qty'] ?? 0),
-                            'per_cup_qty' => (float) ($row['per_cup_qty'] ?? 0),
-                            'per_straw_qty' => (float) ($row['per_straw_qty'] ?? 0),
-                            'ingredients' => $formatIngredientSelection($row['ingredient_item_ids'] ?? null, $row),
+                            'cashier_name' => 'Guardados',
+                            'contact_information' => 'Don Macchiatos | Jaycee Ave, Koronadal , 9506 South Cotabato | 09922742924',
                         ];
                     }
                     ?>
@@ -297,6 +412,113 @@ require_once __DIR__ . '/includes/layout_top.php';
             </tbody>
         </table>
     </div>
+    <?php endif; ?>
+
+    <?php if ($isAccountingDepartment): ?>
+        <?php
+        $incomeRows = array_values(array_filter($rows, static function (array $row): bool {
+            return (string) ($row['entry_type'] ?? '') === 'income';
+        }));
+        $expenseRows = array_values(array_filter($rows, static function (array $row): bool {
+            return (string) ($row['entry_type'] ?? '') === 'expense';
+        }));
+
+        $incomeTotal = 0.0;
+        foreach ($incomeRows as $incomeRow) {
+            $incomeTotal += (float) ($incomeRow['amount'] ?? 0);
+        }
+
+        $expenseTotal = 0.0;
+        foreach ($expenseRows as $expenseRow) {
+            $expenseTotal += (float) ($expenseRow['amount'] ?? 0);
+        }
+
+        $netRevenue = $incomeTotal - $expenseTotal;
+        ?>
+
+        <div class="mt-6 grid gap-4 xl:grid-cols-3">
+            <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h4 class="text-sm font-extrabold text-emerald-700">Income</h4>
+                <p class="mt-1 text-xs text-slate-500">Filtered approved and pending income entries in this view.</p>
+                <div class="table-scroll mt-3">
+                    <table class="stack-table w-full min-w-[340px] text-sm">
+                        <thead>
+                        <tr class="text-left text-slate-500">
+                            <th class="pb-2 pr-4" data-priority="high">Source</th>
+                            <th class="pb-2 pr-4" data-priority="high">Amount</th>
+                            <th class="pb-2" data-priority="medium">Status</th>
+                        </tr>
+                        </thead>
+                        <tbody class="text-slate-700">
+                        <?php if ($incomeRows): ?>
+                            <?php foreach ($incomeRows as $incomeRow): ?>
+                                <tr class="border-t border-slate-100">
+                                    <td class="py-2 pr-4"><?= e((string) ($incomeRow['source'] ?? '-')) ?></td>
+                                    <td class="py-2 pr-4 font-semibold"><?= e(format_money((float) ($incomeRow['amount'] ?? 0))) ?></td>
+                                    <td class="py-2"><span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) ($incomeRow['status'] ?? 'pending'))) ?>"><?= e(strtoupper((string) ($incomeRow['status'] ?? 'pending'))) ?></span></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="3" class="py-3 text-slate-500">No income entries.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+
+            <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h4 class="text-sm font-extrabold text-rose-700">Expenses</h4>
+                <p class="mt-1 text-xs text-slate-500">Purchasing and other outgoing transactions.</p>
+                <div class="table-scroll mt-3">
+                    <table class="stack-table w-full min-w-[340px] text-sm">
+                        <thead>
+                        <tr class="text-left text-slate-500">
+                            <th class="pb-2 pr-4" data-priority="high">Source</th>
+                            <th class="pb-2 pr-4" data-priority="high">Amount</th>
+                            <th class="pb-2" data-priority="medium">Status</th>
+                        </tr>
+                        </thead>
+                        <tbody class="text-slate-700">
+                        <?php if ($expenseRows): ?>
+                            <?php foreach ($expenseRows as $expenseRow): ?>
+                                <tr class="border-t border-slate-100">
+                                    <td class="py-2 pr-4"><?= e((string) ($expenseRow['source'] ?? '-')) ?></td>
+                                    <td class="py-2 pr-4 font-semibold"><?= e(format_money((float) ($expenseRow['amount'] ?? 0))) ?></td>
+                                    <td class="py-2"><span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) ($expenseRow['status'] ?? 'pending'))) ?>"><?= e(strtoupper((string) ($expenseRow['status'] ?? 'pending'))) ?></span></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="3" class="py-3 text-slate-500">No expense entries.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+
+            <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h4 class="text-sm font-extrabold text-slate-900">Total Revenue</h4>
+                <p class="mt-1 text-xs text-slate-500">Income minus expenses from the current filtered records.</p>
+                <div class="table-scroll mt-3">
+                    <table class="stack-table w-full min-w-[320px] text-sm">
+                        <tbody class="text-slate-700">
+                            <tr class="border-t border-slate-100">
+                                <td class="py-2 pr-4 font-semibold">Total Income</td>
+                                <td class="py-2 text-right font-semibold text-emerald-700"><?= e(format_money($incomeTotal)) ?></td>
+                            </tr>
+                            <tr class="border-t border-slate-100">
+                                <td class="py-2 pr-4 font-semibold">Total Expenses</td>
+                                <td class="py-2 text-right font-semibold text-rose-700"><?= e(format_money($expenseTotal)) ?></td>
+                            </tr>
+                            <tr class="border-t border-slate-200">
+                                <td class="py-2 pr-4 font-black">Net Revenue</td>
+                                <td class="py-2 text-right font-black <?= $netRevenue >= 0 ? 'text-emerald-700' : 'text-rose-700' ?>"><?= e(format_money($netRevenue)) ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </div>
+    <?php endif; ?>
 
     <?php if ($totalPages > 1): ?>
         <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
@@ -313,6 +535,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <?php endif; ?>
 </section>
 
+<?php if ($showCreateModal): ?>
 <div id="modal-create" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'modal-create')">
     <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
         <div class="flex items-start justify-between gap-3">
@@ -347,8 +570,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php elseif ($fieldType === 'inventory_select'): ?>
                         <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
                             <option value="">Select inventory item</option>
-                            <?php foreach ($approvedInventoryItems as $item): ?>
-                                <option value="<?= e((string) $item['id']) ?>"><?= e($formatInventoryItemLabel($item)) ?></option>
+                            <?php foreach ($approvedIngredientItems as $item): ?>
+                                <option value="<?= e((string) $item['id']) ?>" data-item-unit="<?= e((string) ($item['unit'] ?? '')) ?>" data-item-stock="<?= e((string) number_format((float) ($item['stock_qty'] ?? 0), 2)) ?>"><?= e($formatInventoryItemLabel($item, false)) ?></option>
                             <?php endforeach; ?>
                         </select>
                     <?php elseif ($fieldType === 'crm_select'): ?>
@@ -392,6 +615,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                         $stepAttribute = $inputType === 'number' ? ' step="' . e((string) ($field['step'] ?? 'any')) . '"' : '';
                         ?>
                         <input type="<?= e($inputType) ?>" name="<?= e($fieldName) ?>"<?= $stepAttribute ?> class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
+                        <?php if ($department === 'purchasing' && $fieldName === 'requested_qty'): ?>
+                            <p class="mt-1 text-xs font-semibold text-slate-500" data-purchase-unit-display>Unit Type: Select ingredient first</p>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </div>
             <?php endforeach; ?>
@@ -403,12 +629,14 @@ require_once __DIR__ . '/includes/layout_top.php';
     </div>
 </div>
 
+<?php endif; ?>
+
 <?php foreach ($rows as $row): ?>
     <?php
     $rowId = (int) $row['id'];
-    $inventoryItemName = strtolower(trim((string) ($row['item_name'] ?? '')));
-    $isInventoryCupOrStraw = $department === 'inventory' && in_array($inventoryItemName, ['cup', 'straw'], true);
-    $canManage = (($user['role'] ?? '') === ROLE_GENERAL_MANAGER || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0) || $isInventoryCupOrStraw);
+    $canManage = $department !== 'inventory'
+        && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
+            || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
     $isApproved = ($row['status'] ?? '') === 'approved';
     ?>
 
@@ -509,8 +737,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                             <?php elseif ($fieldType === 'inventory_select'): ?>
                                 <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
                                     <option value="">Select inventory item</option>
-                                    <?php foreach ($approvedInventoryItems as $item): ?>
-                                        <option value="<?= e((string) $item['id']) ?>" <?= (int) $value === (int) $item['id'] ? 'selected' : '' ?>><?= e($formatInventoryItemLabel($item)) ?></option>
+                                    <?php foreach ($approvedIngredientItems as $item): ?>
+                                        <option value="<?= e((string) $item['id']) ?>" data-item-unit="<?= e((string) ($item['unit'] ?? '')) ?>" data-item-stock="<?= e((string) number_format((float) ($item['stock_qty'] ?? 0), 2)) ?>" <?= (int) $value === (int) $item['id'] ? 'selected' : '' ?>><?= e($formatInventoryItemLabel($item, false)) ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             <?php elseif ($fieldType === 'crm_select'): ?>
@@ -557,6 +785,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                                 $stepAttribute = $inputType === 'number' ? ' step="' . e((string) ($field['step'] ?? 'any')) . '"' : '';
                                 ?>
                                 <input type="<?= e($inputType) ?>" name="<?= e($fieldName) ?>" value="<?= e((string) $value) ?>"<?= $stepAttribute ?> class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
+                                <?php if ($department === 'purchasing' && $fieldName === 'requested_qty'): ?>
+                                    <p class="mt-1 text-xs font-semibold text-slate-500" data-purchase-unit-display>Unit Type: Select ingredient first</p>
+                                <?php endif; ?>
                             <?php endif; ?>
                         </div>
                     <?php endforeach; ?>
@@ -639,16 +870,14 @@ require_once __DIR__ . '/includes/layout_top.php';
             writeWrappedLine('Order Code', payload.order_code || '-', false);
             writeWrappedLine('Customer', payload.customer_name || '-', false);
             writeWrappedLine('Beverage', payload.beverage_name || '-', false);
-            writeWrappedLine('Ingredients', payload.ingredients || '-', false);
             writeWrappedLine('Qty x Unit Price', Number(payload.quantity || 0).toFixed(0) + ' x PHP ' + Number(payload.unit_price || 0).toFixed(2), false);
-            writeWrappedLine('Stock Deduct Per Order', Number(payload.stock_deduct_qty || 0).toFixed(2), false);
-            writeWrappedLine('Per Cup Value', Number(payload.per_cup_qty || 0).toFixed(2), false);
-            writeWrappedLine('Per Straw Value', Number(payload.per_straw_qty || 0).toFixed(2), false);
             writeWrappedLine('Payment Method', payload.payment_method || '-', false);
             if (payload.payment_reference) {
                 writeWrappedLine('Payment Ref', payload.payment_reference, false);
             }
             writeWrappedLine('Paid At', payload.paid_at || '-', false);
+            writeWrappedLine('Cashier Name', payload.cashier_name || '-', false);
+            writeWrappedLine('Contact Information', payload.contact_information || '-', false);
 
             y += 2;
             doc.text('----------------------------------------------', left, y);
@@ -664,6 +893,52 @@ require_once __DIR__ . '/includes/layout_top.php';
             const filenameBase = (payload.receipt_no || payload.order_code || 'receipt').toString().replace(/\s+/g, '-');
             doc.save(filenameBase + '.pdf');
         }
+    </script>
+<?php endif; ?>
+
+<?php if ($department === 'purchasing'): ?>
+    <script>
+        (function () {
+            function syncPurchasingUnitType(form) {
+                if (!form) {
+                    return;
+                }
+
+                const inventorySelect = form.querySelector('select[name="inventory_item_id"]');
+                const unitDisplay = form.querySelector('[data-purchase-unit-display]');
+                if (!inventorySelect || !unitDisplay) {
+                    return;
+                }
+
+                const selectedOption = inventorySelect.options[inventorySelect.selectedIndex];
+                const unitType = selectedOption ? (selectedOption.getAttribute('data-item-unit') || '') : '';
+                unitDisplay.textContent = unitType !== ''
+                    ? ('Unit Type: ' + unitType)
+                    : 'Unit Type: Select ingredient first';
+            }
+
+            function initializePurchasingUnitType() {
+                document.querySelectorAll('form[action="handlers.php"]').forEach(function (form) {
+                    const inventorySelect = form.querySelector('select[name="inventory_item_id"]');
+                    const unitDisplay = form.querySelector('[data-purchase-unit-display]');
+                    if (!inventorySelect || !unitDisplay) {
+                        return;
+                    }
+
+                    if (inventorySelect.dataset.unitTypeBound !== '1') {
+                        inventorySelect.dataset.unitTypeBound = '1';
+                        inventorySelect.addEventListener('change', function () {
+                            syncPurchasingUnitType(form);
+                        });
+                    }
+
+                    syncPurchasingUnitType(form);
+                });
+            }
+
+            document.addEventListener('DOMContentLoaded', initializePurchasingUnitType);
+            window.addEventListener('load', initializePurchasingUnitType);
+        })();
     </script>
 <?php endif; ?>
 

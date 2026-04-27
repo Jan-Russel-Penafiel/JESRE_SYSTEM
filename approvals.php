@@ -8,18 +8,28 @@ $pdo = db();
 $pendingRecords = [];
 
 $inventoryMap = [];
-$inventoryRows = $pdo->query('SELECT id, item_name, stock_qty, unit FROM inventory_items ORDER BY item_name ASC')->fetchAll();
+$ingredientSelectionMap = [];
+$inventoryRows = $pdo->query('SELECT id, item_name, stock_qty, unit, per_cup_qty, per_straw_qty FROM inventory_items ORDER BY item_name ASC')->fetchAll();
 foreach ($inventoryRows as $inventoryRow) {
-    $inventoryMap[(int) $inventoryRow['id']] = $inventoryRow['item_name'] . ' (' . number_format((float) $inventoryRow['stock_qty'], 2) . ' ' . $inventoryRow['unit'] . ')';
+    $inventoryId = (int) ($inventoryRow['id'] ?? 0);
+    $itemName = (string) ($inventoryRow['item_name'] ?? '-');
+    $stockQty = number_format((float) ($inventoryRow['stock_qty'] ?? 0), 2);
+    $unit = (string) ($inventoryRow['unit'] ?? '');
+    $perCupQty = number_format((float) ($inventoryRow['per_cup_qty'] ?? 0), 2);
+    $perStrawQty = number_format((float) ($inventoryRow['per_straw_qty'] ?? 0), 2);
+
+    $baseLabel = $itemName . ' (' . $stockQty . ' ' . $unit . ')';
+    $inventoryMap[$inventoryId] = $baseLabel;
+    $ingredientSelectionMap[$inventoryId] = $baseLabel . ' | Cup: ' . $perCupQty . ' | Straw: ' . $perStrawQty;
 }
 
-$formatIngredientSelection = static function ($value, array $record) use ($inventoryMap): string {
+$formatIngredientSelection = static function ($value, array $record) use ($ingredientSelectionMap): string {
     $ids = normalize_inventory_item_ids($value);
     if ($ids === []) {
         $ids = inventory_item_ids_from_record($record);
     }
 
-    return format_inventory_item_selection($ids, $inventoryMap);
+    return format_inventory_item_selection($ids, $ingredientSelectionMap);
 };
 
 foreach (department_configs() as $departmentKey => $departmentConfig) {

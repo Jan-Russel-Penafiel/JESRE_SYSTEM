@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n 'if \\($action ===' /c/xampp/htdocs/re/handlers.php)"
+    ]
+  }
+}
