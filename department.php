@@ -208,6 +208,7 @@ if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
         'caramel syrup' => 0,
         'hazelnut syrup' => 1,
         'mocha syrup' => 2,
+        'vanilla syrup' => 3,
     ];
 
     usort($approvedIngredientItems, static function (array $left, array $right) use ($priorityFlavorOrder): int {
@@ -588,15 +589,44 @@ require_once __DIR__ . '/includes/layout_top.php';
                             </select>
                         <?php endif; ?>
                     <?php elseif ($fieldType === 'inventory_multi_select'): ?>
-                        <?php $selectionGroupId = 'create-' . $fieldName; ?>
+                        <?php
+                        $selectionGroupId = 'create-' . $fieldName;
+                        $syrupNames = ['caramel syrup', 'hazelnut syrup', 'mocha syrup', 'vanilla syrup'];
+                        $syrupItems = [];
+                        $nonSyrupItems = [];
+                        foreach ($approvedIngredientItems as $item) {
+                            if (in_array(strtolower(trim((string) ($item['item_name'] ?? ''))), $syrupNames, true)) {
+                                $syrupItems[] = $item;
+                            } else {
+                                $nonSyrupItems[] = $item;
+                            }
+                        }
+                        $syrupSelectId = $selectionGroupId . '-syrup-select';
+                        ?>
                         <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
                             <label class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600">
                                 <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-slate-900" data-select-all="<?= e($selectionGroupId) ?>">
                                 <span>Select all ingredients</span>
                             </label>
 
+                            <?php if ($syrupItems !== []): ?>
+                                <div class="mt-3">
+                                    <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Syrup Flavor</label>
+                                    <select id="<?= e($syrupSelectId) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" onchange="syncSyrupSelection('<?= e($selectionGroupId) ?>', this.value)">
+                                        <option value="">— No syrup —</option>
+                                        <?php foreach ($syrupItems as $item): ?>
+                                            <option value="<?= e((string) $item['id']) ?>"><?= e((string) ($item['item_name'] ?? '')) ?> (<?= e(number_format((float) ($item['stock_qty'] ?? 0), 2)) ?> <?= e((string) ($item['unit'] ?? '')) ?>)</option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <?php foreach ($syrupItems as $item): ?>
+                                        <?php $inputId = $selectionGroupId . '-' . (int) $item['id']; ?>
+                                        <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($fieldName) ?>[]" value="<?= e((string) $item['id']) ?>" data-select-item="<?= e($selectionGroupId) ?>" data-syrup-checkbox class="hidden">
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+
                             <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                                <?php foreach ($approvedIngredientItems as $item): ?>
+                                <?php foreach ($nonSyrupItems as $item): ?>
                                     <?php $inputId = $selectionGroupId . '-' . (int) $item['id']; ?>
                                     <label for="<?= e($inputId) ?>" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
                                         <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($fieldName) ?>[]" value="<?= e((string) $item['id']) ?>" data-select-item="<?= e($selectionGroupId) ?>" class="h-4 w-4 rounded border-slate-300 text-slate-900">
@@ -755,15 +785,54 @@ require_once __DIR__ . '/includes/layout_top.php';
                                     </select>
                                 <?php endif; ?>
                             <?php elseif ($fieldType === 'inventory_multi_select'): ?>
-                                <?php $selectionGroupId = 'edit-' . $rowId . '-' . $fieldName; ?>
+                                <?php
+                                $selectionGroupId = 'edit-' . $rowId . '-' . $fieldName;
+                                $syrupNames = ['caramel syrup', 'hazelnut syrup', 'mocha syrup', 'vanilla syrup'];
+                                $syrupItems = [];
+                                $nonSyrupItems = [];
+                                foreach ($approvedIngredientItems as $item) {
+                                    if (in_array(strtolower(trim((string) ($item['item_name'] ?? ''))), $syrupNames, true)) {
+                                        $syrupItems[] = $item;
+                                    } else {
+                                        $nonSyrupItems[] = $item;
+                                    }
+                                }
+                                $syrupSelectId = $selectionGroupId . '-syrup-select';
+                                $selectedSyrupId = '';
+                                foreach ($syrupItems as $item) {
+                                    if (in_array((int) $item['id'], $selectedInventoryValues, true)) {
+                                        $selectedSyrupId = (string) $item['id'];
+                                        break;
+                                    }
+                                }
+                                ?>
                                 <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
                                     <label class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600">
                                         <input type="checkbox" class="h-4 w-4 rounded border-slate-300 text-slate-900" data-select-all="<?= e($selectionGroupId) ?>">
                                         <span>Select all ingredients</span>
                                     </label>
 
+                                    <?php if ($syrupItems !== []): ?>
+                                        <div class="mt-3">
+                                            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Syrup Flavor</label>
+                                            <select id="<?= e($syrupSelectId) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" onchange="syncSyrupSelection('<?= e($selectionGroupId) ?>', this.value)">
+                                                <option value="">— No syrup —</option>
+                                                <?php foreach ($syrupItems as $item): ?>
+                                                    <option value="<?= e((string) $item['id']) ?>" <?= $selectedSyrupId === (string) $item['id'] ? 'selected' : '' ?>><?= e((string) ($item['item_name'] ?? '')) ?> (<?= e(number_format((float) ($item['stock_qty'] ?? 0), 2)) ?> <?= e((string) ($item['unit'] ?? '')) ?>)</option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                            <?php foreach ($syrupItems as $item): ?>
+                                                <?php
+                                                $inputId = $selectionGroupId . '-' . (int) $item['id'];
+                                                $isChecked = in_array((int) $item['id'], $selectedInventoryValues, true);
+                                                ?>
+                                                <input id="<?= e($inputId) ?>" type="checkbox" name="<?= e($fieldName) ?>[]" value="<?= e((string) $item['id']) ?>" data-select-item="<?= e($selectionGroupId) ?>" data-syrup-checkbox class="hidden" <?= $isChecked ? 'checked' : '' ?>>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
+
                                     <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                                        <?php foreach ($approvedIngredientItems as $item): ?>
+                                        <?php foreach ($nonSyrupItems as $item): ?>
                                             <?php
                                             $inputId = $selectionGroupId . '-' . (int) $item['id'];
                                             $isChecked = in_array((int) $item['id'], $selectedInventoryValues, true);

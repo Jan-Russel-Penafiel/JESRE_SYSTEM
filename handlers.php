@@ -95,14 +95,10 @@ $upsertLowStockPurchaseRequest = static function (
 
             $updateStmt = $db->prepare("UPDATE purchase_requests
                 SET requested_qty = ?,
-                    estimated_total = CASE
-                        WHEN quoted_unit_cost IS NULL THEN estimated_total
-                        ELSE ROUND(quoted_unit_cost * ?, 2)
-                    END,
                     notes = ?,
                     updated_at = NOW()
                 WHERE id = ?");
-            $updateStmt->execute([$targetRequestQty, $targetRequestQty, $newNotes, (int) $existing['id']]);
+            $updateStmt->execute([$targetRequestQty, $newNotes, (int) $existing['id']]);
 
             $updatedRequest = $fetchRecord($db, 'purchase_requests', (int) $existing['id'], false);
             write_audit_log(
@@ -587,10 +583,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
 
         $expenseAmount = (float) ($record['estimated_total'] ?? 0);
         if ($expenseAmount <= 0) {
-            $quotedUnitCost = (float) ($record['quoted_unit_cost'] ?? 0);
-            if ($quotedUnitCost > 0 && $requestedQty > 0) {
-                $expenseAmount = round($quotedUnitCost * $requestedQty, 2);
-            }
+            $expenseAmount = (float) ($record['quoted_unit_cost'] ?? 0);
         }
 
         $insertAccounting = $db->prepare("INSERT INTO accounting_entries
@@ -856,9 +849,7 @@ try {
             $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
             $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
             $data['request_code'] = ($data['request_code'] ?? null) ?: next_purchase_request_code($pdo);
-            $data['estimated_total'] = $data['quoted_unit_cost'] === null
-                ? 0
-                : ($data['requested_qty'] * (float) $data['quoted_unit_cost']);
+            $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : (float) $data['quoted_unit_cost'];
         }
 
         if ($department === 'sales') {
@@ -1030,9 +1021,7 @@ try {
             $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
             $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
             $data['request_code'] = ($data['request_code'] ?? null) ?: (string) ($record['request_code'] ?? next_purchase_request_code($pdo));
-            $data['estimated_total'] = $data['quoted_unit_cost'] === null
-                ? 0
-                : ($data['requested_qty'] * (float) $data['quoted_unit_cost']);
+            $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : (float) $data['quoted_unit_cost'];
         }
 
         if ($department === 'sales') {

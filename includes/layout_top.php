@@ -202,9 +202,21 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
                 toggle.dataset.selectAllInitialized = '1';
 
                 toggle.addEventListener('change', function () {
+                    var syrupSelect = document.getElementById(groupId + '-syrup-select');
                     document.querySelectorAll('[data-select-item="' + groupId + '"]').forEach(function (checkbox) {
+                        if (checkbox.hasAttribute('data-syrup-checkbox')) {
+                            return;
+                        }
                         checkbox.checked = toggle.checked;
                     });
+                    if (syrupSelect) {
+                        if (toggle.checked && syrupSelect.value === '' && syrupSelect.options.length > 1) {
+                            syrupSelect.value = syrupSelect.options[1].value;
+                        } else if (!toggle.checked) {
+                            syrupSelect.value = '';
+                        }
+                        syncSyrupSelection(groupId, syrupSelect.value);
+                    }
 
                     syncIngredientSelectAllState(groupId);
                 });
@@ -222,6 +234,13 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
 
                 syncIngredientSelectAllState(groupId);
             });
+        }
+
+        function syncSyrupSelection(groupId, selectedValue) {
+            document.querySelectorAll('[data-select-item="' + groupId + '"][data-syrup-checkbox]').forEach(function (checkbox) {
+                checkbox.checked = selectedValue !== '' && checkbox.value === selectedValue;
+            });
+            syncIngredientSelectAllState(groupId);
         }
 
         document.addEventListener('DOMContentLoaded', function () {

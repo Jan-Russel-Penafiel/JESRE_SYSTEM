@@ -553,7 +553,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="mt-1 text-xl font-black text-brand-700"><?= e(number_format($purchasingStats['total_requested_qty'], 2)) ?></p>
         </div>
         <div class="rounded-xl border border-slate-200 bg-slate-100 p-3">
-            <p class="text-xs uppercase tracking-wide text-slate-600">Approved Estimated Spend</p>
+            <p class="text-xs uppercase tracking-wide text-slate-600">Approved Total Cost</p>
             <p class="mt-1 text-xl font-black text-slate-900"><?= e(format_money($purchasingStats['approved_estimated_total'])) ?></p>
         </div>
     </div>

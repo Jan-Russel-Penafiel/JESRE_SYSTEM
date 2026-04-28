@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     approved_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_inventory_item_name (item_name),
     INDEX idx_inventory_status (status),
     INDEX idx_inventory_stock (stock_qty, reorder_level),
     CONSTRAINT fk_inventory_submitted_by FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE SET NULL,
@@ -244,15 +245,15 @@ SET @gm_id = (SELECT id FROM users WHERE username = 'gm' LIMIT 1);
 SET @inv_head_id = (SELECT id FROM users WHERE username = 'inv_head' LIMIT 1);
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Coffee Beans', 'kg', 55.00, 20.00, 'Primary espresso beans', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Coffee Beans', 'kg', 10.00, 2.00, 'Primary espresso beans', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Coffee Beans');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Milk', 'liter', 90.00, 30.00, 'Fresh milk stock', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Milk', 'liter', 10.00, 2.00, 'Fresh milk stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Milk');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Caramel Syrup', 'bottle', 1297348.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Caramel Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Caramel Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
@@ -260,17 +261,17 @@ SELECT 'Vanilla Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Vanilla Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Hazelnut Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Hazelnut Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Hazelnut Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Mocha Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Mocha Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Mocha Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Cup', 'pcs', 1000.00, 200.00, 'Utility cup stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Cup', 'pcs', 200.00, 50.00, 'Utility cup stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Cup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Straw', 'pcs', 1000.00, 200.00, 'Utility straw stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
+SELECT 'Straw', 'pcs', 200.00, 50.00, 'Utility straw stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Straw');
