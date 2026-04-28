@@ -20,7 +20,6 @@ $table = $config['table'];
 
 $search = trim((string) ($_GET['q'] ?? ''));
 $statusFilter = (string) ($_GET['status'] ?? 'all');
-$entryTypeFilter = (string) ($_GET['entry_type'] ?? 'all');
 $dateFrom = (string) ($_GET['from'] ?? '');
 $dateTo = (string) ($_GET['to'] ?? '');
 $rangeFilter = (string) ($_GET['range'] ?? 'all');
@@ -28,7 +27,6 @@ $page = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = (int) ($_GET['per_page'] ?? 10);
 $allowedPerPage = [10, 25, 50, 100];
 $statusOptions = ['all', 'pending', 'approved', 'rejected'];
-$entryTypeOptions = ['all', 'income', 'expense'];
 $rangeOptions = ['all', 'daily', 'weekly', 'monthly'];
 
 if (!in_array($perPage, $allowedPerPage, true)) {
@@ -37,10 +35,6 @@ if (!in_array($perPage, $allowedPerPage, true)) {
 
 if (!in_array($statusFilter, $statusOptions, true)) {
     $statusFilter = 'all';
-}
-
-if (!in_array($entryTypeFilter, $entryTypeOptions, true)) {
-    $entryTypeFilter = 'all';
 }
 
 if (!in_array($rangeFilter, $rangeOptions, true)) {
@@ -66,20 +60,29 @@ if ($rangeFilter === 'daily') {
     $dateTo = date('Y-m-t');
 }
 
+$isInventoryDepartment = $department === 'inventory';
+$isAccountingDepartment = $department === 'accounting';
+$isCrmDepartment = $department === 'crm';
+$showCreateModal = !$isInventoryDepartment && !$isAccountingDepartment && !$isCrmDepartment;
+$showApplyResetButtons = !$isAccountingDepartment && !$isCrmDepartment;
+$autoSubmitFilters = $isCrmDepartment;
+
+if ($isAccountingDepartment) {
+    $table = 'sales_orders';
+}
+
 $where = [];
 $params = [];
 
-if ($statusFilter !== 'all') {
+if ($isAccountingDepartment) {
+    $where[] = "t.status = 'approved'";
+    $where[] = 'DATE(t.approved_at) = CURDATE()';
+} elseif ($statusFilter !== 'all') {
     $where[] = 't.status = ?';
     $params[] = $statusFilter;
 }
 
-if ($department === 'accounting' && $entryTypeFilter !== 'all') {
-    $where[] = 't.entry_type = ?';
-    $params[] = $entryTypeFilter;
-}
-
-if ($search !== '' && $department !== 'accounting') {
+if ($search !== '' && !$isAccountingDepartment) {
     $searchColumns = array_values(array_unique(array_map(static function (array $field): string {
         return $field['name'];
     }, $config['fields'])));
@@ -101,12 +104,12 @@ if ($search !== '' && $department !== 'accounting') {
     $where[] = '(' . implode(' OR ', $searchConditions) . ')';
 }
 
-if ($dateFrom !== '') {
+if (!$isAccountingDepartment && $dateFrom !== '') {
     $where[] = 'DATE(t.created_at) >= ?';
     $params[] = $dateFrom;
 }
 
-if ($dateTo !== '') {
+if (!$isAccountingDepartment && $dateTo !== '') {
     $where[] = 'DATE(t.created_at) <= ?';
     $params[] = $dateTo;
 }
@@ -147,12 +150,6 @@ $approvedCrmProfiles = [];
 $createButtonLabel = (string) ($config['create_button_label'] ?? 'Create Record');
 $submitLabel = (string) ($config['submit_label'] ?? 'Save Record');
 $editLabel = (string) ($config['edit_label'] ?? 'Save Changes');
-$isInventoryDepartment = $department === 'inventory';
-$isAccountingDepartment = $department === 'accounting';
-$isCrmDepartment = $department === 'crm';
-$showCreateModal = !$isInventoryDepartment && !$isAccountingDepartment && !$isCrmDepartment;
-$showApplyResetButtons = !$isAccountingDepartment && !$isCrmDepartment;
-$autoSubmitFilters = $isAccountingDepartment || $isCrmDepartment;
 
 if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
     $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, per_cup_qty, per_straw_qty, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
@@ -197,7 +194,7 @@ if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
         $existingItemId = (int) ($existingItem['id'] ?? 0);
         $currentItemId = (int) ($item['id'] ?? 0);
 
-        if ($currentStockQty > $existingStockQty || ($currentStockQty === $existingStockQty && $currentItemId > $existingItemId)) {
+        if ($currentStockQty > $existingStockQty || $currentStockQty === $existingStockQty && $currentItemId > $existingItemId) {
             $deduplicatedIngredientItems[$itemNameKey] = $item;
         }
     }
@@ -298,25 +295,15 @@ require_once __DIR__ . '/includes/layout_top.php';
         <input type="hidden" name="dept" value="<?= e($department) ?>">
         <input type="hidden" name="range" value="<?= e($rangeFilter) ?>">
 
-        <?php if ($isAccountingDepartment): ?>
-            <div class="md:col-span-2 xl:col-span-2">
-                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Type</label>
-                <select name="entry_type" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
-                    <?php foreach ($entryTypeOptions as $option): ?>
-                        <option value="<?= e($option) ?>" <?= $entryTypeFilter === $option ? 'selected' : '' ?>><?= e(ucfirst($option)) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-        <?php else: ?>
-            <div class="md:col-span-2 xl:col-span-2">
-                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Search</label>
-                <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search records" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
-            </div>
-        <?php endif; ?>
+        <div class="md:col-span-2 xl:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Search</label>
+            <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search records" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $isAccountingDepartment ? 'disabled' : '' ?>>
+        </div>
 
+        <?php if (!$isAccountingDepartment): ?>
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Status</label>
-            <select name="status" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
+            <select name="status" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
                 <?php foreach ($statusOptions as $option): ?>
                     <option value="<?= e($option) ?>" <?= $statusFilter === $option ? 'selected' : '' ?>><?= e(ucfirst($option)) ?></option>
                 <?php endforeach; ?>
@@ -325,22 +312,23 @@ require_once __DIR__ . '/includes/layout_top.php';
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">From</label>
-            <input type="date" name="from" value="<?= e($dateFrom) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
+            <input type="date" name="from" value="<?= e($dateFrom) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
         </div>
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">To</label>
-            <input type="date" name="to" value="<?= e($dateTo) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
+            <input type="date" name="to" value="<?= e($dateTo) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
         </div>
 
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Rows</label>
-            <select name="per_page" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $autoSubmitFilters ? 'onchange="this.form.submit()"' : '' ?>>
+            <select name="per_page" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
                 <?php foreach ($allowedPerPage as $size): ?>
                     <option value="<?= e((string) $size) ?>" <?= $perPage === $size ? 'selected' : '' ?>><?= e((string) $size) ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
+        <?php endif; ?>
 
         <div class="md:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2">
             <div class="flex flex-wrap items-center gap-2">
@@ -450,50 +438,39 @@ require_once __DIR__ . '/includes/layout_top.php';
 
     <?php if ($isAccountingDepartment): ?>
         <?php
-        $incomeRows = array_values(array_filter($rows, static function (array $row): bool {
-            return (string) ($row['entry_type'] ?? '') === 'income';
-        }));
-        $expenseRows = array_values(array_filter($rows, static function (array $row): bool {
-            return (string) ($row['entry_type'] ?? '') === 'expense';
-        }));
-
-        $incomeTotal = 0.0;
-        foreach ($incomeRows as $incomeRow) {
-            $incomeTotal += (float) ($incomeRow['amount'] ?? 0);
+        $dailySalesTotal = 0.0;
+        foreach ($rows as $dsRow) {
+            $dailySalesTotal += (float) ($dsRow['total_amount'] ?? 0);
         }
-
-        $expenseTotal = 0.0;
-        foreach ($expenseRows as $expenseRow) {
-            $expenseTotal += (float) ($expenseRow['amount'] ?? 0);
-        }
-
-        $netRevenue = $incomeTotal - $expenseTotal;
         ?>
-
-        <div class="mt-6 grid gap-4 xl:grid-cols-3">
+        <div class="mt-6 grid gap-4 xl:grid-cols-2">
             <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h4 class="text-sm font-extrabold text-emerald-700">Income</h4>
-                <p class="mt-1 text-xs text-slate-500">Filtered approved and pending income entries in this view.</p>
+                <h4 class="text-sm font-extrabold text-blue-700">Daily Sales Transactions</h4>
+                <p class="mt-1 text-xs text-slate-500">Today's approved sales orders.</p>
                 <div class="table-scroll mt-3">
-                    <table class="stack-table w-full min-w-[340px] text-sm">
+                    <table class="stack-table w-full min-w-[420px] text-sm">
                         <thead>
                         <tr class="text-left text-slate-500">
-                            <th class="pb-2 pr-4" data-priority="high">Source</th>
-                            <th class="pb-2 pr-4" data-priority="high">Amount</th>
-                            <th class="pb-2" data-priority="medium">Status</th>
+                            <th class="pb-2 pr-3" data-priority="high">Customer</th>
+                            <th class="pb-2 pr-3" data-priority="high">Flavor</th>
+                            <th class="pb-2 pr-3 text-right" data-priority="medium">Qty</th>
+                            <th class="pb-2 pr-3 text-right" data-priority="high">Amount</th>
+                            <th class="pb-2 text-right" data-priority="high">Total</th>
                         </tr>
                         </thead>
                         <tbody class="text-slate-700">
-                        <?php if ($incomeRows): ?>
-                            <?php foreach ($incomeRows as $incomeRow): ?>
+                        <?php if ($rows): ?>
+                            <?php foreach ($rows as $dsRow): ?>
                                 <tr class="border-t border-slate-100">
-                                    <td class="py-2 pr-4"><?= e((string) ($incomeRow['source'] ?? '-')) ?></td>
-                                    <td class="py-2 pr-4 font-semibold"><?= e(format_money((float) ($incomeRow['amount'] ?? 0))) ?></td>
-                                    <td class="py-2"><span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) ($incomeRow['status'] ?? 'pending'))) ?>"><?= e(strtoupper((string) ($incomeRow['status'] ?? 'pending'))) ?></span></td>
+                                    <td class="py-2 pr-3"><?= e((string) ($dsRow['customer_name'] ?? '-')) ?></td>
+                                    <td class="py-2 pr-3"><?= e((string) ($dsRow['beverage_name'] ?? '-')) ?></td>
+                                    <td class="py-2 pr-3 text-right"><?= e((string) ((int) ($dsRow['quantity'] ?? 0))) ?></td>
+                                    <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($dsRow['unit_price'] ?? 0))) ?></td>
+                                    <td class="py-2 text-right font-semibold"><?= e(format_money((float) ($dsRow['total_amount'] ?? 0))) ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php else: ?>
-                            <tr><td colspan="3" class="py-3 text-slate-500">No income entries.</td></tr>
+                            <tr><td colspan="5" class="py-3 text-slate-500">No sales transactions today.</td></tr>
                         <?php endif; ?>
                         </tbody>
                     </table>
@@ -501,51 +478,22 @@ require_once __DIR__ . '/includes/layout_top.php';
             </article>
 
             <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h4 class="text-sm font-extrabold text-rose-700">Expenses</h4>
-                <p class="mt-1 text-xs text-slate-500">Purchasing and other outgoing transactions.</p>
-                <div class="table-scroll mt-3">
-                    <table class="stack-table w-full min-w-[340px] text-sm">
-                        <thead>
-                        <tr class="text-left text-slate-500">
-                            <th class="pb-2 pr-4" data-priority="high">Source</th>
-                            <th class="pb-2 pr-4" data-priority="high">Amount</th>
-                            <th class="pb-2" data-priority="medium">Status</th>
-                        </tr>
-                        </thead>
-                        <tbody class="text-slate-700">
-                        <?php if ($expenseRows): ?>
-                            <?php foreach ($expenseRows as $expenseRow): ?>
-                                <tr class="border-t border-slate-100">
-                                    <td class="py-2 pr-4"><?= e((string) ($expenseRow['source'] ?? '-')) ?></td>
-                                    <td class="py-2 pr-4 font-semibold"><?= e(format_money((float) ($expenseRow['amount'] ?? 0))) ?></td>
-                                    <td class="py-2"><span class="rounded-full px-2 py-1 text-xs font-bold <?= e(status_badge_class((string) ($expenseRow['status'] ?? 'pending'))) ?>"><?= e(strtoupper((string) ($expenseRow['status'] ?? 'pending'))) ?></span></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <tr><td colspan="3" class="py-3 text-slate-500">No expense entries.</td></tr>
-                        <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </article>
-
-            <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h4 class="text-sm font-extrabold text-slate-900">Total Revenue</h4>
-                <p class="mt-1 text-xs text-slate-500">Income minus expenses from the current filtered records.</p>
+                <h4 class="text-sm font-extrabold text-slate-900">Total Sales Daily</h4>
+                <p class="mt-1 text-xs text-slate-500">Summary of today's approved sales transactions.</p>
                 <div class="table-scroll mt-3">
                     <table class="stack-table w-full min-w-[320px] text-sm">
                         <tbody class="text-slate-700">
                             <tr class="border-t border-slate-100">
-                                <td class="py-2 pr-4 font-semibold">Total Income</td>
-                                <td class="py-2 text-right font-semibold text-emerald-700"><?= e(format_money($incomeTotal)) ?></td>
+                                <td class="py-2 pr-4 font-semibold">Total Transactions</td>
+                                <td class="py-2 text-right font-semibold text-blue-700"><?= e((string) count($rows)) ?></td>
                             </tr>
                             <tr class="border-t border-slate-100">
-                                <td class="py-2 pr-4 font-semibold">Total Expenses</td>
-                                <td class="py-2 text-right font-semibold text-rose-700"><?= e(format_money($expenseTotal)) ?></td>
+                                <td class="py-2 pr-4 font-semibold">Total Cups Sold</td>
+                                <td class="py-2 text-right font-semibold text-blue-700"><?= e((string) array_sum(array_column($rows, 'quantity'))) ?></td>
                             </tr>
                             <tr class="border-t border-slate-200">
-                                <td class="py-2 pr-4 font-black">Net Revenue</td>
-                                <td class="py-2 text-right font-black <?= $netRevenue >= 0 ? 'text-emerald-700' : 'text-rose-700' ?>"><?= e(format_money($netRevenue)) ?></td>
+                                <td class="py-2 pr-4 font-black">Total Amount</td>
+                                <td class="py-2 text-right font-black text-emerald-700"><?= e(format_money($dailySalesTotal)) ?></td>
                             </tr>
                         </tbody>
                     </table>
