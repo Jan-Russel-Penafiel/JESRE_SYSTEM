@@ -144,13 +144,7 @@ function fetch_active_beverage_recipes(PDO $pdo): array
             continue;
         }
 
-        $requiredQty = (float) ($row['required_qty'] ?? 0);
-        $qtyLabel = number_format($requiredQty, 2);
-        $unit = trim((string) ($row['unit'] ?? ''));
-        $ingredientLabel = $itemName . ' ' . $qtyLabel;
-        if ($unit !== '') {
-            $ingredientLabel .= ' ' . $unit;
-        }
+        $ingredientLabel = $itemName;
 
         $recipes[$recipeName]['ingredients'][] = $ingredientLabel;
     }
