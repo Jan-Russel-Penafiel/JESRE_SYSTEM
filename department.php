@@ -483,14 +483,6 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <div class="table-scroll mt-3">
                     <table class="stack-table w-full min-w-[320px] text-sm">
                         <tbody class="text-slate-700">
-                            <tr class="border-t border-slate-100">
-                                <td class="py-2 pr-4 font-semibold">Total Transactions</td>
-                                <td class="py-2 text-right font-semibold text-blue-700"><?= e((string) count($rows)) ?></td>
-                            </tr>
-                            <tr class="border-t border-slate-100">
-                                <td class="py-2 pr-4 font-semibold">Total Cups Sold</td>
-                                <td class="py-2 text-right font-semibold text-blue-700"><?= e((string) array_sum(array_column($rows, 'quantity'))) ?></td>
-                            </tr>
                             <tr class="border-t border-slate-200">
                                 <td class="py-2 pr-4 font-black">Total Amount</td>
                                 <td class="py-2 text-right font-black text-emerald-700"><?= e(format_money($dailySalesTotal)) ?></td>
