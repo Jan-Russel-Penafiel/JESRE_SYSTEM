@@ -713,73 +713,8 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
         throw new RuntimeException('Sales approval requires a valid quantity.');
     }
 
-    $recipeItems = fetch_recipe_items_by_beverage($db, (string) ($record['beverage_name'] ?? ''));
-    if ($recipeItems !== []) {
-        foreach ($recipeItems as $recipeItem) {
-            $inventoryItemId = (int) ($recipeItem['inventory_item_id'] ?? 0);
-            $requiredQty = (float) ($recipeItem['required_qty'] ?? 0) * $quantity;
-            if ($inventoryItemId <= 0 || $requiredQty <= 0) {
-                continue;
-            }
-
-            $deductInventory(
-                $db,
-                $inventoryItemId,
-                $requiredQty,
-                $approverId,
-                'Auto-deducted recipe usage from approved sales order #' . (int) $record['id']
-            );
-        }
-    } else {
-        $selectedIngredientIds = inventory_item_ids_from_record($record);
-        $totalIngredientDeduction = $quantity;
-
-        if ($selectedIngredientIds === [] || $totalIngredientDeduction <= 0) {
-            throw new RuntimeException('Sales approval requires ingredient selections and quantity.');
-        }
-
-        foreach ($selectedIngredientIds as $inventoryItemId) {
-            $deductInventory(
-                $db,
-                $inventoryItemId,
-                $totalIngredientDeduction,
-                $approverId,
-                'Auto-deducted stock from approved sales order #' . (int) $record['id']
-            );
-        }
-
-        $cupRequiredQty = $quantity;
-        if ($cupRequiredQty > 0) {
-            $cupInventoryItemId = $resolveInventoryUtilityItemId($db, 'cup');
-            if ($cupInventoryItemId <= 0) {
-                throw new RuntimeException('Cup inventory item is not configured or approved.');
-            }
-
-            $deductInventory(
-                $db,
-                $cupInventoryItemId,
-                $cupRequiredQty,
-                $approverId,
-                'Auto-deducted cup usage from approved sales order #' . (int) $record['id']
-            );
-        }
-
-        $strawRequiredQty = $quantity;
-        if ($strawRequiredQty > 0) {
-            $strawInventoryItemId = $resolveInventoryUtilityItemId($db, 'straw');
-            if ($strawInventoryItemId <= 0) {
-                throw new RuntimeException('Straw inventory item is not configured or approved.');
-            }
-
-            $deductInventory(
-                $db,
-                $strawInventoryItemId,
-                $strawRequiredQty,
-                $approverId,
-                'Auto-deducted straw usage from approved sales order #' . (int) $record['id']
-            );
-        }
-    }
+    // Ingredient deduction is handled by Production when the daily batch is logged.
+    // Sales only records the transaction and generates accounting/CRM entries.
 
     $orderCode = (string) ($record['order_code'] ?? ('ORDER-' . (int) $record['id']));
     $totalAmount = (float) ($record['total_amount'] ?? 0);
@@ -809,6 +744,58 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
         'Auto-created accounting entry from approved sales order ' . $orderCode . '.',
         'system'
     );
+
+    // Record COGS expense: sum ingredient costs consumed for this sale
+    $cogsTotal = 0.0;
+    $cogsRecipeItems = fetch_recipe_items_by_beverage($db, (string) ($record['beverage_name'] ?? ''));
+    foreach ($cogsRecipeItems as $cogsItem) {
+        $cogsItemId = (int) ($cogsItem['inventory_item_id'] ?? 0);
+        if ($cogsItemId <= 0) {
+            continue;
+        }
+        $latestPurchase = $db->prepare(
+            "SELECT quoted_unit_cost, requested_qty FROM purchase_requests
+             WHERE inventory_item_id = ? AND status = 'approved' AND quoted_unit_cost IS NOT NULL AND requested_qty > 0
+             ORDER BY approved_at DESC LIMIT 1"
+        );
+        $latestPurchase->execute([$cogsItemId]);
+        $purchaseRow = $latestPurchase->fetch();
+        if (!$purchaseRow) {
+            continue;
+        }
+        $unitCost = (float) $purchaseRow['quoted_unit_cost'] / (float) $purchaseRow['requested_qty'];
+        $qtyUsed = (float) ($cogsItem['required_qty'] ?? 0) * $quantity;
+        $cogsTotal += $unitCost * $qtyUsed;
+    }
+    $cogsTotal = round($cogsTotal, 2);
+
+    if ($cogsTotal > 0) {
+        $insertCogs = $db->prepare("INSERT INTO accounting_entries
+            (entry_type, source, amount, description, status, submitted_by, approved_by, approval_note, approved_at)
+            VALUES ('expense', ?, ?, ?, 'approved', ?, ?, 'Auto-generated COGS from approved sales order.', NOW())");
+        $insertCogs->execute([
+            'COGS ' . $orderCode,
+            $cogsTotal,
+            'Cost of goods sold for ' . (string) ($record['beverage_name'] ?? '') . ' x' . (int) $quantity . ' (auto-computed from ingredient costs).',
+            $record['submitted_by'] ?? null,
+            $approverId,
+        ]);
+
+        $cogsEntryId = (int) $db->lastInsertId();
+        $cogsEntry = $fetchRecord($db, 'accounting_entries', $cogsEntryId, false);
+        write_audit_log(
+            $db,
+            'accounting',
+            'accounting_entries',
+            $cogsEntryId,
+            'system_create',
+            null,
+            $cogsEntry,
+            $approverId,
+            'Auto-created COGS expense entry from approved sales order ' . $orderCode . '.',
+            'system'
+        );
+    }
 
     $customerName = trim((string) ($record['customer_name'] ?? ''));
     if ($customerName === '') {
@@ -943,7 +930,7 @@ try {
             $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
             $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
             $data['request_code'] = ($data['request_code'] ?? null) ?: next_purchase_request_code($pdo);
-            $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : (float) $data['quoted_unit_cost'];
+            $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : round((float) $data['quoted_unit_cost'] * $data['requested_qty'], 2);
         }
 
         if ($department === 'sales') {
@@ -974,26 +961,19 @@ try {
         $data['status'] = 'pending';
         $data['submitted_by'] = (int) ($user['id'] ?? 0);
         $realTimeSales = $department === 'sales' && REALTIME_SALES_MODE;
-        if ($realTimeSales) {
+        $realTimeProduction = $department === 'production';
+        if ($realTimeSales || $realTimeProduction) {
             $data['status'] = 'approved';
             $data['approved_by'] = (int) ($user['id'] ?? 0);
-            $data['approval_note'] = 'Auto-approved in real-time POS mode.';
+            $data['approval_note'] = $realTimeProduction
+                ? 'Auto-approved on save. Production records are locked after submission.'
+                : 'Auto-approved in real-time POS mode.';
             $data['approved_at'] = date('Y-m-d H:i:s');
         }
 
         $columns = array_keys($data);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
         $columnSql = implode(', ', $columns);
-
-        if ($department === 'sales') {
-            $ensureRecipeIngredientAvailability(
-                $pdo,
-                $salesRecipeItems,
-                (float) ($data['quantity'] ?? 0),
-                (int) ($user['id'] ?? 0),
-                'sales order'
-            );
-        }
 
         if ($department === 'production') {
             $ensureRecipeIngredientAvailability(
@@ -1012,6 +992,34 @@ try {
             $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
             if (!$inventoryLinkStmt->fetch()) {
                 throw new RuntimeException('Selected ingredient item for purchasing does not exist.');
+            }
+        }
+
+        if ($department === 'sales') {
+            $salesBeverageName = (string) ($data['beverage_name'] ?? '');
+            $salesQtyRequested = (int) ($data['quantity'] ?? 0);
+
+            $producedStmt = $pdo->prepare(
+                "SELECT COALESCE(SUM(quantity_prepared), 0) FROM production_logs
+                 WHERE LOWER(beverage_name) = LOWER(?) AND status = 'approved' AND DATE(created_at) = CURDATE()"
+            );
+            $producedStmt->execute([$salesBeverageName]);
+            $totalProduced = (int) $producedStmt->fetchColumn();
+
+            $soldStmt = $pdo->prepare(
+                "SELECT COALESCE(SUM(quantity), 0) FROM sales_orders
+                 WHERE LOWER(beverage_name) = LOWER(?) AND status = 'approved' AND DATE(created_at) = CURDATE()"
+            );
+            $soldStmt->execute([$salesBeverageName]);
+            $totalSold = (int) $soldStmt->fetchColumn();
+
+            $productionRemaining = $totalProduced - $totalSold;
+            if ($productionRemaining < $salesQtyRequested) {
+                throw new RuntimeException(
+                    'Not enough production stock for ' . $salesBeverageName . '. '
+                    . 'Available: ' . max(0, $productionRemaining) . ' cup(s). '
+                    . 'Please log production first before recording this sale.'
+                );
             }
         }
 
@@ -1036,15 +1044,18 @@ try {
             'user'
         );
 
-        if ($realTimeSales) {
+        if ($realTimeSales || $realTimeProduction) {
             $applyApprovalAutomation($pdo, $department, $createdRecord ?? [], (int) ($user['id'] ?? 0));
 
+            $autoNote = $realTimeProduction
+                ? 'Auto-approved on save. Production record locked.'
+                : 'Auto-approved in real-time POS mode.';
             $log = $pdo->prepare('INSERT INTO approval_logs (module, record_id, action, note, action_by) VALUES (?, ?, ?, ?, ?)');
             $log->execute([
                 $department,
                 $recordId,
                 'approved',
-                'Auto-approved in real-time POS mode.',
+                $autoNote,
                 (int) ($user['id'] ?? 0),
             ]);
         }
@@ -1053,8 +1064,8 @@ try {
 
         set_flash(
             'success',
-            $realTimeSales
-                ? (department_label($department) . ' record created and processed in real-time.')
+            ($realTimeSales || $realTimeProduction)
+                ? (department_label($department) . ' record saved and locked.')
                 : (department_label($department) . ' record created and queued for manager review.')
         );
         $redirectToDepartment($department);
@@ -1071,6 +1082,10 @@ try {
             throw new RuntimeException('Editing inventory records directly is disabled for this workflow.');
         }
 
+        if ($department === 'production') {
+            throw new RuntimeException('Production records are locked after saving and cannot be edited.');
+        }
+
         $id = (int) ($_POST['id'] ?? 0);
         if ($id <= 0) {
             throw new RuntimeException('Invalid record ID.');
@@ -1081,6 +1096,10 @@ try {
         $record = $fetchRecord($pdo, $table, $id, false);
         if (!$record) {
             throw new RuntimeException('Record not found.');
+        }
+
+        if ($department === 'sales' && ($record['status'] ?? '') === 'approved') {
+            throw new RuntimeException('Sales records cannot be edited after they have been processed.');
         }
 
         $assertOwnsRecord($user ?? [], $record);
@@ -1121,7 +1140,7 @@ try {
             $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
             $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
             $data['request_code'] = ($data['request_code'] ?? null) ?: (string) ($record['request_code'] ?? next_purchase_request_code($pdo));
-            $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : (float) $data['quoted_unit_cost'];
+            $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : round((float) $data['quoted_unit_cost'] * $data['requested_qty'], 2);
         }
 
         if ($department === 'sales') {
@@ -1264,6 +1283,10 @@ try {
             throw new RuntimeException('Deleting inventory records directly is disabled for this workflow.');
         }
 
+        if ($department === 'production') {
+            throw new RuntimeException('Production records are locked after saving and cannot be deleted.');
+        }
+
         $id = (int) ($_POST['id'] ?? 0);
         if ($id <= 0) {
             throw new RuntimeException('Invalid record ID.');
@@ -1379,18 +1402,12 @@ try {
     $productionUnavailablePrefix = 'Ingredient request cannot be fulfilled.';
 
     if (
-        in_array($department, ['sales', 'production'], true)
+        $department === 'production'
         && in_array($action, ['create_record', 'edit_record'], true)
     ) {
-        $isSalesEscalation = strncmp($errorMessage, $salesUnavailablePrefix, strlen($salesUnavailablePrefix)) === 0;
         $isProductionEscalation = strncmp($errorMessage, $productionUnavailablePrefix, strlen($productionUnavailablePrefix)) === 0;
 
-        $salesErrorLower = strtolower($errorMessage);
-        $shouldAttemptSalesEscalation = !$isSalesEscalation
-            || strpos($salesErrorLower, 'stock is insufficient') !== false
-            || strpos($salesErrorLower, 'inventory department has been alerted and purchasing department has been notified') !== false;
-
-        if (($isSalesEscalation || $isProductionEscalation) && $shouldAttemptSalesEscalation) {
+        if ($isProductionEscalation) {
             $inventoryItemIds = $excludeUtilityIngredientIds($pdo, $_POST['ingredient_item_ids'] ?? []);
             if ($inventoryItemIds === []) {
                 $legacyInventoryItemId = (int) ($_POST['inventory_item_id'] ?? 0);
@@ -1399,41 +1416,10 @@ try {
                 }
             }
 
-            $requiredQty = 0.0;
-            $purchaseReason = '';
-            $fallbackMessage = '';
-            $missingInventoryMessage = '';
-
-            if ($department === 'sales') {
-                $quantity = (float) ($_POST['quantity'] ?? 0);
-                $errorLower = $salesErrorLower;
-
-                if (strpos($errorLower, 'cup stock is insufficient') !== false) {
-                    $cupInventoryItemId = $resolveInventoryUtilityItemId($pdo, 'cup');
-                    $inventoryItemIds = $cupInventoryItemId > 0 ? [$cupInventoryItemId] : [];
-                    $requiredQty = $quantity;
-                    $purchaseReason = 'Inventory Department received a shortage alert from Sales POS cup consumption. Required %s but only %s available.';
-                    $fallbackMessage = 'Flavor unavailable for this order. Cup stock alert reached Inventory, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
-                    $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate linked cup inventory item for auto-escalation.';
-                } elseif (strpos($errorLower, 'straw stock is insufficient') !== false) {
-                    $strawInventoryItemId = $resolveInventoryUtilityItemId($pdo, 'straw');
-                    $inventoryItemIds = $strawInventoryItemId > 0 ? [$strawInventoryItemId] : [];
-                    $requiredQty = $quantity;
-                    $purchaseReason = 'Inventory Department received a shortage alert from Sales POS straw consumption. Required %s but only %s available.';
-                    $fallbackMessage = 'Flavor unavailable for this order. Straw stock alert reached Inventory, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
-                    $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate linked straw inventory item for auto-escalation.';
-                } else {
-                    $requiredQty = $quantity;
-                    $purchaseReason = 'Inventory Department received a shortage alert from Sales POS. Required %s but only %s available.';
-                    $fallbackMessage = 'Flavor unavailable for this order. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
-                    $missingInventoryMessage = 'Flavor unavailable for this order. Unable to locate linked inventory ingredient items for auto-escalation.';
-                }
-            } else {
-                $requiredQty = (float) ($_POST['quantity_prepared'] ?? 0);
-                $purchaseReason = 'Inventory Department received a shortage alert from Production. Required %s but only %s available.';
-                $fallbackMessage = 'Ingredient request cannot be fulfilled. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
-                $missingInventoryMessage = 'Ingredient request cannot be fulfilled. Unable to locate linked inventory ingredient items for auto-escalation.';
-            }
+            $requiredQty = (float) ($_POST['quantity_prepared'] ?? 0);
+            $purchaseReason = 'Inventory Department received a shortage alert from Production. Required %s but only %s available.';
+            $fallbackMessage = 'Ingredient request cannot be fulfilled. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+            $missingInventoryMessage = 'Ingredient request cannot be fulfilled. Unable to locate linked inventory ingredient items for auto-escalation.';
 
             if ($inventoryItemIds !== [] && $requiredQty > 0) {
                 try {

@@ -266,6 +266,28 @@ if ($department === 'sales') {
     $jsPdfVersion = is_file($jsPdfFile) ? (string) filemtime($jsPdfFile) : '1';
 }
 
+$todayProductionStock = [];
+if ($department === 'production') {
+    $stockStmt = $pdo->query(
+        "SELECT
+            pl.beverage_name,
+            COALESCE(SUM(pl.quantity_prepared), 0) AS produced,
+            COALESCE(s.sold, 0) AS sold,
+            COALESCE(SUM(pl.quantity_prepared), 0) - COALESCE(s.sold, 0) AS remaining
+        FROM production_logs pl
+        LEFT JOIN (
+            SELECT LOWER(beverage_name) AS bname, SUM(quantity) AS sold
+            FROM sales_orders
+            WHERE status = 'approved' AND DATE(created_at) = CURDATE()
+            GROUP BY LOWER(beverage_name)
+        ) s ON s.bname = LOWER(pl.beverage_name)
+        WHERE pl.status = 'approved' AND DATE(pl.created_at) = CURDATE()
+        GROUP BY pl.beverage_name, s.sold
+        ORDER BY pl.beverage_name ASC"
+    );
+    $todayProductionStock = $stockStmt ? $stockStmt->fetchAll() : [];
+}
+
 $pageTitle = $config['title'];
 $activePage = 'department_' . $department;
 require_once __DIR__ . '/includes/layout_top.php';
@@ -359,6 +381,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php
                     $rowId = (int) $row['id'];
                     $canManage = $department !== 'inventory'
+                        && $department !== 'production'
+                        && !($department === 'sales' && ($row['status'] ?? '') === 'approved')
                         && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
                             || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
                     $isApproved = ($row['status'] ?? '') === 'approved';
@@ -540,6 +564,44 @@ require_once __DIR__ . '/includes/layout_top.php';
             </div>
         </div>
     <?php endif; ?>
+
+    <?php if ($department === 'production'): ?>
+        <div class="mt-6">
+            <h4 class="text-sm font-extrabold text-slate-900">Today's Production Stock</h4>
+            <p class="mt-1 text-xs text-slate-500">Produced today minus cups already sold. Resets at midnight.</p>
+            <?php if ($todayProductionStock): ?>
+                <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <?php foreach ($todayProductionStock as $stockRow): ?>
+                        <?php
+                        $remaining = (int) ($stockRow['remaining'] ?? 0);
+                        $produced = (int) ($stockRow['produced'] ?? 0);
+                        $sold = (int) ($stockRow['sold'] ?? 0);
+                        $remainingClass = $remaining <= 0 ? 'text-rose-700' : ($remaining <= 10 ? 'text-amber-700' : 'text-emerald-700');
+                        ?>
+                        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <p class="text-sm font-extrabold text-slate-900"><?= e((string) ($stockRow['beverage_name'] ?? '-')) ?></p>
+                            <div class="mt-2 grid grid-cols-3 gap-1 text-center text-xs">
+                                <div class="rounded-lg bg-slate-50 p-2">
+                                    <p class="font-bold text-slate-500 uppercase tracking-wide">Produced</p>
+                                    <p class="mt-1 text-lg font-extrabold text-slate-900"><?= e((string) $produced) ?></p>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-2">
+                                    <p class="font-bold text-slate-500 uppercase tracking-wide">Sold</p>
+                                    <p class="mt-1 text-lg font-extrabold text-slate-900"><?= e((string) $sold) ?></p>
+                                </div>
+                                <div class="rounded-lg bg-slate-50 p-2">
+                                    <p class="font-bold text-slate-500 uppercase tracking-wide">Remaining</p>
+                                    <p class="mt-1 text-lg font-extrabold <?= e($remainingClass) ?>"><?= e((string) max(0, $remaining)) ?></p>
+                                </div>
+                            </div>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php else: ?>
+                <p class="mt-3 text-sm text-slate-500">No production logged for today yet.</p>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 </section>
 
 <?php if ($showCreateModal): ?>
@@ -688,6 +750,8 @@ require_once __DIR__ . '/includes/layout_top.php';
     <?php
     $rowId = (int) $row['id'];
     $canManage = $department !== 'inventory'
+        && $department !== 'production'
+        && !($department === 'sales' && ($row['status'] ?? '') === 'approved')
         && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
             || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
     $isApproved = ($row['status'] ?? '') === 'approved';
