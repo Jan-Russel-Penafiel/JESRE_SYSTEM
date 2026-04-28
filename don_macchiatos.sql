@@ -258,7 +258,7 @@ CREATE TABLE `beverage_recipe_items` (
   `id` int(10) UNSIGNED NOT NULL,
   `recipe_id` int(10) UNSIGNED NOT NULL,
   `inventory_item_id` int(10) UNSIGNED NOT NULL,
-  `required_qty` decimal(12,2) NOT NULL DEFAULT 0.00
+  `required_qty` decimal(12,3) NOT NULL DEFAULT 0.000
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -277,18 +277,18 @@ INSERT INTO `beverage_recipe_items` (`id`, `recipe_id`, `inventory_item_id`, `re
 (9, 2, 6, 1.00),
 (10, 2, 7, 1.00),
 (11, 3, 2, 0.10),
-(12, 3, 3, 0.10),
-(13, 3, 1, 0.13),
+(12, 3, 17, 0.10),
+(13, 3, 1, 0.125),
 (14, 3, 6, 1.00),
 (15, 3, 7, 1.00),
 (16, 4, 2, 0.10),
-(17, 4, 3, 0.10),
-(18, 4, 1, 0.13),
+(17, 4, 19, 0.10),
+(18, 4, 1, 0.125),
 (19, 4, 6, 1.00),
 (20, 4, 7, 1.00),
 (21, 5, 2, 0.10),
-(22, 5, 3, 0.10),
-(23, 5, 1, 0.13),
+(22, 5, 8, 0.10),
+(23, 5, 1, 0.125),
 (24, 5, 6, 1.00),
 (25, 5, 7, 1.00);
 

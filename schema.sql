@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS beverage_recipe_items (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     recipe_id INT UNSIGNED NOT NULL,
     inventory_item_id INT UNSIGNED NOT NULL,
-    required_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+    required_qty DECIMAL(12,3) NOT NULL DEFAULT 0,
     INDEX idx_recipe_items_recipe (recipe_id),
     INDEX idx_recipe_items_inventory (inventory_item_id),
     CONSTRAINT fk_recipe_items_recipe FOREIGN KEY (recipe_id) REFERENCES beverage_recipes (id) ON DELETE CASCADE,
@@ -441,7 +441,7 @@ WHERE i.item_name = 'Milk'
 INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
 SELECT @matcha_recipe_id, i.id, 0.10
 FROM inventory_items i
-WHERE i.item_name = 'Caramel Syrup'
+WHERE i.item_name = 'Matcha coffee Syrup'
     AND @matcha_recipe_id IS NOT NULL
     AND NOT EXISTS (
         SELECT 1 FROM beverage_recipe_items bri
@@ -449,7 +449,7 @@ WHERE i.item_name = 'Caramel Syrup'
     );
 
 INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
-SELECT @matcha_recipe_id, i.id, 0.13
+SELECT @matcha_recipe_id, i.id, 0.125
 FROM inventory_items i
 WHERE i.item_name = 'Coffee Beans'
     AND @matcha_recipe_id IS NOT NULL
@@ -491,7 +491,7 @@ WHERE i.item_name = 'Milk'
 INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
 SELECT @hazelnuts_recipe_id, i.id, 0.10
 FROM inventory_items i
-WHERE i.item_name = 'Caramel Syrup'
+WHERE i.item_name = 'Hazelnuts Syrup'
     AND @hazelnuts_recipe_id IS NOT NULL
     AND NOT EXISTS (
         SELECT 1 FROM beverage_recipe_items bri
@@ -499,7 +499,7 @@ WHERE i.item_name = 'Caramel Syrup'
     );
 
 INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
-SELECT @hazelnuts_recipe_id, i.id, 0.13
+SELECT @hazelnuts_recipe_id, i.id, 0.125
 FROM inventory_items i
 WHERE i.item_name = 'Coffee Beans'
     AND @hazelnuts_recipe_id IS NOT NULL
@@ -541,7 +541,7 @@ WHERE i.item_name = 'Milk'
 INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
 SELECT @vanilla_recipe_id, i.id, 0.10
 FROM inventory_items i
-WHERE i.item_name = 'Caramel Syrup'
+WHERE i.item_name = 'Vanilla Syrup'
     AND @vanilla_recipe_id IS NOT NULL
     AND NOT EXISTS (
         SELECT 1 FROM beverage_recipe_items bri
@@ -549,7 +549,7 @@ WHERE i.item_name = 'Caramel Syrup'
     );
 
 INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
-SELECT @vanilla_recipe_id, i.id, 0.13
+SELECT @vanilla_recipe_id, i.id, 0.125
 FROM inventory_items i
 WHERE i.item_name = 'Coffee Beans'
     AND @vanilla_recipe_id IS NOT NULL
