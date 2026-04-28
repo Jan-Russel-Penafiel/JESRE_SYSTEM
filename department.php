@@ -352,6 +352,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <?php if ($showApplyResetButtons): ?>
                     <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
                     <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
+                    <?php if ($department === 'production'): ?>
+                        <button type="button" onclick="openModal('modal-production-stock')" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Today's Stock</button>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($showCreateModal): ?>
                     <button type="button" onclick="openModal('modal-create')" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($createButtonLabel) ?></button>
@@ -565,12 +568,22 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
     <?php endif; ?>
 
-    <?php if ($department === 'production'): ?>
-        <div class="mt-6">
-            <h4 class="text-sm font-extrabold text-slate-900">Today's Production Stock</h4>
-            <p class="mt-1 text-xs text-slate-500">Produced today minus cups already sold. Resets at midnight.</p>
+</section>
+
+<?php if ($department === 'production'): ?>
+<div id="modal-production-stock" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'modal-production-stock')">
+    <div class="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+        <div class="flex items-start justify-between gap-3">
+            <div>
+                <h4 class="text-lg font-extrabold text-slate-900">Today's Production Stock</h4>
+                <p class="mt-0.5 text-xs text-slate-500">Produced today minus cups already sold. Resets at midnight.</p>
+            </div>
+            <button type="button" onclick="closeModal('modal-production-stock')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
+        </div>
+
+        <div class="mt-4">
             <?php if ($todayProductionStock): ?>
-                <div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div class="grid gap-3 sm:grid-cols-2">
                     <?php foreach ($todayProductionStock as $stockRow): ?>
                         <?php
                         $remaining = (int) ($stockRow['remaining'] ?? 0);
@@ -598,11 +611,12 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php endforeach; ?>
                 </div>
             <?php else: ?>
-                <p class="mt-3 text-sm text-slate-500">No production logged for today yet.</p>
+                <p class="text-sm text-slate-500">No production logged for today yet.</p>
             <?php endif; ?>
         </div>
-    <?php endif; ?>
-</section>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($showCreateModal): ?>
 <div id="modal-create" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'modal-create')">

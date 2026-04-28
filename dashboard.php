@@ -12,6 +12,12 @@ if (!in_array($range, ['daily', 'weekly', 'monthly'], true)) {
     $range = 'daily';
 }
 
+$gmDepts = ['purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing'];
+$gmDept  = (string) ($_GET['dept'] ?? 'purchasing');
+if (!in_array($gmDept, $gmDepts, true)) {
+    $gmDept = 'purchasing';
+}
+
 $rangeSqlMap = [
     'daily' => 'DATE(created_at) = CURDATE()',
     'weekly' => 'YEARWEEK(created_at, 1) = YEARWEEK(CURDATE(), 1)',
@@ -538,12 +544,58 @@ $activePage = 'dashboard';
 require_once __DIR__ . '/includes/layout_top.php';
 ?>
 
-<?php if ($canAccessPurchasing): ?>
-<section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php $isGeneralManager = ($user['role'] ?? '') === ROLE_GENERAL_MANAGER; ?>
+
+<?php if ($isGeneralManager): ?>
+<?php
+$gmDeptMeta = [
+    'purchasing' => ['label' => 'Purchasing', 'activeClass' => 'border-slate-700  bg-slate-700  text-white',           'inactiveClass' => 'border-slate-300  bg-slate-50 text-slate-700  hover:border-slate-500 hover:bg-slate-100 hover:text-slate-900 hover:-translate-y-0.5 hover:shadow-sm'],
+    'inventory'  => ['label' => 'Inventory',  'activeClass' => 'border-brand-700  bg-brand-700  text-white',           'inactiveClass' => 'border-brand-300  bg-brand-50 text-brand-700  hover:border-brand-500 hover:bg-brand-100 hover:text-brand-900 hover:-translate-y-0.5 hover:shadow-sm'],
+    'production' => ['label' => 'Production', 'activeClass' => 'border-violet-700 bg-violet-700 text-white',           'inactiveClass' => 'border-violet-300 bg-violet-50 text-violet-700 hover:border-violet-500 hover:bg-violet-100 hover:text-violet-900 hover:-translate-y-0.5 hover:shadow-sm'],
+    'sales'      => ['label' => 'Sales',      'activeClass' => 'border-emerald-700 bg-emerald-700 text-white',         'inactiveClass' => 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:border-emerald-500 hover:bg-emerald-100 hover:text-emerald-900 hover:-translate-y-0.5 hover:shadow-sm'],
+    'accounting' => ['label' => 'Accounting', 'activeClass' => 'border-amber-700  bg-amber-700  text-white',           'inactiveClass' => 'border-amber-300  bg-amber-50 text-amber-700  hover:border-amber-500 hover:bg-amber-100 hover:text-amber-900 hover:-translate-y-0.5 hover:shadow-sm'],
+    'crm'        => ['label' => 'CRM',        'activeClass' => 'border-sky-700    bg-sky-700    text-white',           'inactiveClass' => 'border-sky-300    bg-sky-50 text-sky-700    hover:border-sky-500 hover:bg-sky-100 hover:text-sky-900 hover:-translate-y-0.5 hover:shadow-sm'],
+    'marketing'  => ['label' => 'Marketing',  'activeClass' => 'border-rose-700   bg-rose-700   text-white',           'inactiveClass' => 'border-rose-300   bg-rose-50 text-rose-700   hover:border-rose-500 hover:bg-rose-100 hover:text-rose-900 hover:-translate-y-0.5 hover:shadow-sm'],
+];
+?>
+<section class="mt-8 rounded-2xl border border-brand-200 bg-brand-50 p-5 shadow-sm">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <h3 class="text-base font-extrabold text-brand-900">General Manager — Department Filter</h3>
+            <p class="text-xs text-brand-700">Select a department and time range to view its dashboard.</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <?php foreach ($rangeLabelMap as $rangeKey => $rangeLabel): ?>
+                <?php $isRangeActive = $rangeKey === $range; ?>
+                <a href="dashboard.php?dept=<?= e($gmDept) ?>&range=<?= e($rangeKey) ?>"
+                   class="<?= $isRangeActive
+                       ? 'inline-flex items-center rounded-full border border-brand-700 bg-brand-700 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white transition'
+                       : 'inline-flex items-center rounded-full border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-brand-700 transition hover:border-brand-500 hover:bg-brand-100 hover:text-brand-900 hover:-translate-y-0.5 hover:shadow-sm' ?>">
+                    <?= e($rangeLabel) ?>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+        <?php foreach ($gmDeptMeta as $dKey => $dMeta): ?>
+            <?php $isDeptActive = $dKey === $gmDept; ?>
+                <a href="dashboard.php?dept=<?= e($dKey) ?>&range=<?= e($range) ?>"
+                    class="inline-flex items-center rounded-full border px-4 py-1.5 text-xs font-bold uppercase tracking-wide transition <?= e($isDeptActive ? $dMeta['activeClass'] : $dMeta['inactiveClass']) ?>">
+                <?= e($dMeta['label']) ?>
+            </a>
+        <?php endforeach; ?>
+    </div>
+</section>
+<?php endif; ?>
+
+<?php if ($canAccessPurchasing && (!$isGeneralManager || $gmDept === 'purchasing')): ?>
+<section id="dept-purchasing" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Purchasing Department Dashboard</h3>
         <p class="text-sm text-slate-600">Statistical analytics of purchasing ingredients and inventory status.</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -651,12 +703,14 @@ require_once __DIR__ . '/includes/layout_top.php';
 </section>
 <?php endif; ?>
 
-<?php if ($canAccessInventory): ?>
-<section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php if ($canAccessInventory && (!$isGeneralManager || $gmDept === 'inventory')): ?>
+<section id="dept-inventory" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Inventory Department Dashboard</h3>
         <p class="text-sm text-slate-600">Inventory status and inventory monitoring.</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -751,12 +805,14 @@ require_once __DIR__ . '/includes/layout_top.php';
 </section>
 <?php endif; ?>
 
-<?php if ($canAccessProduction): ?>
-<section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php if ($canAccessProduction && (!$isGeneralManager || $gmDept === 'production')): ?>
+<section id="dept-production" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Production Department Dashboard</h3>
         <p class="text-sm text-slate-600">Production logs, prepared quantity, and beverage output monitoring.</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -862,12 +918,14 @@ require_once __DIR__ . '/includes/layout_top.php';
 </section>
 <?php endif; ?>
 
-<?php if ($canAccessSales): ?>
-<section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php if ($canAccessSales && (!$isGeneralManager || $gmDept === 'sales')): ?>
+<section id="dept-sales" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Sales Department Dashboard</h3>
         <p class="text-sm text-slate-600">Approved POS performance, payment distribution, and recent sales activity.</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -1013,12 +1071,14 @@ require_once __DIR__ . '/includes/layout_top.php';
 </section>
 <?php endif; ?>
 
-<?php if ($canAccessAccounting): ?>
-<section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php if ($canAccessAccounting && (!$isGeneralManager || $gmDept === 'accounting')): ?>
+<section id="dept-accounting" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Accounting Department Dashboard</h3>
         <p class="text-sm text-slate-600">Sales summary with tracked syrup flavor analytics (Caramel Syrup, Matcha coffee Syrup, Spanish latte Syrup, Hazelnuts Syrup, Vanilla Syrup).</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-3">
@@ -1112,12 +1172,14 @@ require_once __DIR__ . '/includes/layout_top.php';
 </section>
 <?php endif; ?>
 
-<?php if ($canAccessCrm): ?>
-<section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php if ($canAccessCrm && (!$isGeneralManager || $gmDept === 'crm')): ?>
+<section id="dept-crm" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">CRM Department Dashboard</h3>
         <p class="text-sm text-slate-600">CRM coverage, flavor analytics, CRM summary output, sales trend leader, and automated digital promotion feed.</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1300,12 +1362,14 @@ require_once __DIR__ . '/includes/layout_top.php';
 </section>
 <?php endif; ?>
 
-<?php if ($canAccessMarketing): ?>
-<section class="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+<?php if ($canAccessMarketing && (!$isGeneralManager || $gmDept === 'marketing')): ?>
+<section id="dept-marketing" class="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Marketing Department Dashboard</h3>
         <p class="text-sm text-slate-600">CRM coverage for campaign planning and audience reach.</p>
-        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php if (!$isGeneralManager): ?>
+            <?php $renderRangeFilters($range, $rangeLabelMap); ?>
+        <?php endif; ?>
     </div>
 
     <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
