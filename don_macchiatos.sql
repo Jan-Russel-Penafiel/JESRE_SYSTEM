@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Apr 28, 2026 at 03:38 AM
+-- Generation Time: Apr 28, 2026 at 05:20 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -225,6 +225,76 @@ INSERT INTO `audit_trails` (`id`, `module`, `table_name`, `record_id`, `action_t
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `beverage_recipes`
+--
+
+CREATE TABLE `beverage_recipes` (
+  `id` int(10) UNSIGNED NOT NULL,
+  `beverage_name` varchar(120) NOT NULL,
+  `status` enum('active','inactive') NOT NULL DEFAULT 'active',
+  `notes` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `beverage_recipes`
+--
+
+INSERT INTO `beverage_recipes` (`id`, `beverage_name`, `status`, `notes`, `created_at`, `updated_at`) VALUES
+(1, 'Caramel Macchiato', 'active', 'Standard recipe', '2026-04-28 10:40:26', '2026-04-28 10:40:26'),
+(2, 'Spanish Latte', 'active', 'Standard recipe', '2026-04-28 10:40:26', '2026-04-28 10:40:26'),
+(3, 'Matcha coffee', 'active', 'Standard recipe', '2026-04-28 10:54:21', '2026-04-28 10:54:21'),
+(4, 'Hazelnuts coffee', 'active', 'Standard recipe', '2026-04-28 10:54:21', '2026-04-28 10:54:21'),
+(5, 'Vanilla coffee', 'active', 'Standard recipe', '2026-04-28 10:54:21', '2026-04-28 10:54:21');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `beverage_recipe_items`
+--
+
+CREATE TABLE `beverage_recipe_items` (
+  `id` int(10) UNSIGNED NOT NULL,
+  `recipe_id` int(10) UNSIGNED NOT NULL,
+  `inventory_item_id` int(10) UNSIGNED NOT NULL,
+  `required_qty` decimal(12,2) NOT NULL DEFAULT 0.00
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `beverage_recipe_items`
+--
+
+INSERT INTO `beverage_recipe_items` (`id`, `recipe_id`, `inventory_item_id`, `required_qty`) VALUES
+(1, 1, 2, 0.10),
+(2, 1, 3, 0.10),
+(3, 1, 1, 0.13),
+(4, 1, 6, 1.00),
+(5, 1, 7, 1.00),
+(6, 2, 2, 0.10),
+(7, 2, 18, 0.10),
+(8, 2, 1, 0.13),
+(9, 2, 6, 1.00),
+(10, 2, 7, 1.00),
+(11, 3, 2, 0.10),
+(12, 3, 3, 0.10),
+(13, 3, 1, 0.13),
+(14, 3, 6, 1.00),
+(15, 3, 7, 1.00),
+(16, 4, 2, 0.10),
+(17, 4, 3, 0.10),
+(18, 4, 1, 0.13),
+(19, 4, 6, 1.00),
+(20, 4, 7, 1.00),
+(21, 5, 2, 0.10),
+(22, 5, 3, 0.10),
+(23, 5, 1, 0.13),
+(24, 5, 6, 1.00),
+(25, 5, 7, 1.00);
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `code_sequences`
 --
 
@@ -342,7 +412,10 @@ INSERT INTO `inventory_items` (`id`, `item_name`, `unit`, `stock_qty`, `reorder_
 (7, 'Straw', 'pcs', 200.00, 200.00, 1.00, 1.00, 'Utility straw stock for Sales POS deductions', 'approved', NULL, NULL, NULL, '2026-04-23 13:00:38', '2026-04-23 13:00:38', '2026-04-28 09:37:32'),
 (8, 'Vanilla Syrup', 'bottle', 10.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-28 09:37:18'),
 (9, 'Hazelnut Syrup', 'bottle', 10.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-28 09:37:21'),
-(10, 'Mocha Syrup', 'bottle', 10.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-28 09:37:25');
+(10, 'Mocha Syrup', 'bottle', 10.00, 10.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-14 09:46:28', '2026-04-14 09:46:28', '2026-04-28 09:37:25'),
+(17, 'Matcha coffee Syrup', 'bottle', 10.00, 2.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-28 10:36:55', '2026-04-28 10:36:55', '2026-04-28 10:36:55'),
+(18, 'Spanish latte Syrup', 'bottle', 10.00, 2.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-28 10:36:55', '2026-04-28 10:36:55', '2026-04-28 10:36:55'),
+(19, 'Hazelnuts Syrup', 'bottle', 10.00, 2.00, 1.00, 1.00, 'Flavoring stock', 'approved', 2, 1, NULL, '2026-04-28 10:36:55', '2026-04-28 10:36:55', '2026-04-28 10:36:55');
 
 -- --------------------------------------------------------
 
@@ -439,10 +512,10 @@ INSERT INTO `purchase_requests` (`id`, `request_code`, `inventory_item_id`, `req
 (4, 'PR-SMOKE-20260419111813', 1, 3.00, NULL, NULL, 0.00, '2026-04-19', 'smoke approve purchase', 'approved', 4, 1, 'smoke gm approve', '2026-04-19 11:18:14', '2026-04-19 11:18:14', '2026-04-19 11:18:14'),
 (11, '213131', 3, 12.00, 'asdada', 132131.00, 1585572.00, '2026-04-24', 'asdsad', 'approved', 1, 1, NULL, '2026-04-23 11:06:45', '2026-04-23 11:06:33', '2026-04-23 11:06:45'),
 (12, 'qweqweq', 3, 30.00, 'asdada', 123123.00, 3693690.00, '2026-04-24', 'asdad', 'approved', 1, 1, NULL, '2026-04-23 11:07:40', '2026-04-23 11:07:32', '2026-04-23 11:07:40'),
-(13, 'PR20260423-0005', 3, 66001.00, NULL, NULL, 0.00, '2026-04-26', '[SYSTEM] Inventory Department received a shortage alert from Sales POS. Required 66,061.00 but only 60.00 available.', 'approved', 1, 1, NULL, '2026-04-23 12:27:04', '2026-04-23 12:25:09', '2026-04-23 12:27:04'),
-(14, 'PR20260423-0006', 1, 66003.60, NULL, NULL, 0.00, '2026-04-26', '[SYSTEM] Inventory Department received a shortage alert from Sales POS. Required 66,061.00 but only 57.40 available.', 'approved', 1, 1, NULL, '2026-04-23 12:27:06', '2026-04-23 12:25:09', '2026-04-23 12:27:06'),
-(15, 'PR20260423-0007', 2, 65971.00, NULL, NULL, 0.00, '2026-04-26', '[SYSTEM] Inventory Department received a shortage alert from Sales POS. Required 66,061.00 but only 90.00 available.', 'approved', 1, 1, NULL, '2026-04-23 12:27:08', '2026-04-23 12:25:09', '2026-04-23 12:27:08'),
-(16, '123131', 3, 1231231.00, 'sadada', 231.00, 284414361.00, '2026-04-25', 'asda', 'approved', 1, 1, NULL, '2026-04-23 12:27:09', '2026-04-23 12:26:57', '2026-04-23 12:27:09'),
+(13, 'PR20260423-0005', 3, 10.00, NULL, NULL, 0.00, '2026-04-26', '[SYSTEM] Inventory Department received a shortage alert from Sales POS. Required 66,061.00 but only 60.00 available.', 'approved', 1, 1, NULL, '2026-04-23 12:27:04', '2026-04-23 12:25:09', '2026-04-28 11:19:34'),
+(14, 'PR20260423-0006', 1, 10.00, NULL, NULL, 0.00, '2026-04-26', '[SYSTEM] Inventory Department received a shortage alert from Sales POS. Required 66,061.00 but only 57.40 available.', 'approved', 1, 1, NULL, '2026-04-23 12:27:06', '2026-04-23 12:25:09', '2026-04-28 11:19:30'),
+(15, 'PR20260423-0007', 2, 10.00, NULL, NULL, 0.00, '2026-04-26', '[SYSTEM] Inventory Department received a shortage alert from Sales POS. Required 66,061.00 but only 90.00 available.', 'approved', 1, 1, NULL, '2026-04-23 12:27:08', '2026-04-23 12:25:09', '2026-04-28 11:19:28'),
+(16, '123131', 3, 10.00, 'sadada', 231.00, 284414361.00, '2026-04-25', 'asda', 'approved', 1, 1, NULL, '2026-04-23 12:27:09', '2026-04-23 12:26:57', '2026-04-28 11:19:19'),
 (17, 'PR20260428-0001', 9, 12.00, NULL, NULL, 0.00, '2026-05-01', '[SYSTEM] Inventory Department received a low-stock update after inventory deduction. Auto-deducted stock from approved sales order #8\n[SYSTEM] Inventory Department received a low-stock update after inventory deduction. Auto-deducted stock from approved sales order #9', 'approved', 1, 1, NULL, '2026-04-28 09:35:10', '2026-04-28 09:30:44', '2026-04-28 09:35:10'),
 (18, 'PR20260428-0002', 8, 10.00, NULL, NULL, 0.00, '2026-05-01', '[SYSTEM] Inventory Department received a low-stock update after inventory deduction. Auto-deducted stock from approved sales order #8', 'approved', 1, 1, NULL, '2026-04-28 09:35:12', '2026-04-28 09:30:44', '2026-04-28 09:35:12');
 
@@ -557,6 +630,22 @@ ALTER TABLE `audit_trails`
   ADD KEY `fk_audit_performed_by` (`performed_by`);
 
 --
+-- Indexes for table `beverage_recipes`
+--
+ALTER TABLE `beverage_recipes`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uq_beverage_recipe_name` (`beverage_name`),
+  ADD KEY `idx_beverage_recipe_status` (`status`);
+
+--
+-- Indexes for table `beverage_recipe_items`
+--
+ALTER TABLE `beverage_recipe_items`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_recipe_items_recipe` (`recipe_id`),
+  ADD KEY `idx_recipe_items_inventory` (`inventory_item_id`);
+
+--
 -- Indexes for table `code_sequences`
 --
 ALTER TABLE `code_sequences`
@@ -665,6 +754,18 @@ ALTER TABLE `audit_trails`
   MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=120;
 
 --
+-- AUTO_INCREMENT for table `beverage_recipes`
+--
+ALTER TABLE `beverage_recipes`
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+
+--
+-- AUTO_INCREMENT for table `beverage_recipe_items`
+--
+ALTER TABLE `beverage_recipe_items`
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=26;
+
+--
 -- AUTO_INCREMENT for table `crm_profiles`
 --
 ALTER TABLE `crm_profiles`
@@ -680,7 +781,7 @@ ALTER TABLE `crm_purchase_history`
 -- AUTO_INCREMENT for table `inventory_items`
 --
 ALTER TABLE `inventory_items`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=17;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=20;
 
 --
 -- AUTO_INCREMENT for table `marketing_campaigns`
@@ -710,7 +811,7 @@ ALTER TABLE `sales_orders`
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=35;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=59;
 
 --
 -- Constraints for dumped tables
@@ -734,6 +835,13 @@ ALTER TABLE `approval_logs`
 --
 ALTER TABLE `audit_trails`
   ADD CONSTRAINT `fk_audit_performed_by` FOREIGN KEY (`performed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `beverage_recipe_items`
+--
+ALTER TABLE `beverage_recipe_items`
+  ADD CONSTRAINT `fk_recipe_items_inventory` FOREIGN KEY (`inventory_item_id`) REFERENCES `inventory_items` (`id`),
+  ADD CONSTRAINT `fk_recipe_items_recipe` FOREIGN KEY (`recipe_id`) REFERENCES `beverage_recipes` (`id`) ON DELETE CASCADE;
 
 --
 -- Constraints for table `crm_profiles`

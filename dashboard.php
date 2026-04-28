@@ -36,6 +36,18 @@ $rangeWhereByAlias = static function (string $alias) use ($rangeWhere): string {
     return str_replace('created_at', $alias . '.created_at', $rangeWhere);
 };
 
+$renderRangeFilters = static function (string $currentRange, array $rangeLabelMap): void {
+    echo '<div class="mt-3 flex flex-wrap gap-2">';
+    foreach ($rangeLabelMap as $rangeKey => $rangeLabel) {
+        $isActive = $rangeKey === $currentRange;
+        $buttonClass = $isActive
+            ? 'inline-flex items-center rounded-full border border-brand-700 bg-brand-700 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white'
+            : 'inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-600 hover:border-slate-300 hover:bg-white';
+        echo '<a href="dashboard.php?range=' . e($rangeKey) . '" class="' . e($buttonClass) . '">' . e($rangeLabel) . '</a>';
+    }
+    echo '</div>';
+};
+
 $inventoryStatusSnapshot = [
     'total_items' => 0,
     'approved_items' => 0,
@@ -112,8 +124,9 @@ if ($canAccessPurchasing || $canAccessInventory) {
         COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0) AS approved_items,
         COALESCE(SUM(stock_qty), 0) AS total_stock_qty,
         COALESCE(SUM(CASE WHEN stock_qty <= 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
-        COALESCE(SUM(CASE WHEN stock_qty > 0 AND stock_qty <= reorder_level THEN 1 ELSE 0 END), 0) AS low_stock,
-        COALESCE(SUM(CASE WHEN stock_qty > reorder_level THEN 1 ELSE 0 END), 0) AS healthy_stock
+        COALESCE(SUM(CASE WHEN stock_qty > 0 AND stock_qty <= 10 THEN 1 ELSE 0 END), 0) AS low_stock,
+        COALESCE(SUM(CASE WHEN stock_qty > 10 AND stock_qty <= 50 THEN 1 ELSE 0 END), 0) AS watch_stock,
+        COALESCE(SUM(CASE WHEN stock_qty > 50 THEN 1 ELSE 0 END), 0) AS healthy_stock
     FROM inventory_items")->fetch() ?: [];
 
     $inventoryStatusSnapshot = [
@@ -121,6 +134,7 @@ if ($canAccessPurchasing || $canAccessInventory) {
         'approved_items' => (int) ($inventoryStatusRow['approved_items'] ?? 0),
         'total_stock_qty' => (float) ($inventoryStatusRow['total_stock_qty'] ?? 0),
         'low_stock' => (int) ($inventoryStatusRow['low_stock'] ?? 0),
+        'watch_stock' => (int) ($inventoryStatusRow['watch_stock'] ?? 0),
         'out_of_stock' => (int) ($inventoryStatusRow['out_of_stock'] ?? 0),
         'healthy_stock' => (int) ($inventoryStatusRow['healthy_stock'] ?? 0),
     ];
@@ -170,16 +184,16 @@ if ($canAccessInventory) {
         (stock_qty - reorder_level) AS stock_gap,
         CASE
             WHEN stock_qty <= 0 THEN 'out'
-            WHEN stock_qty <= reorder_level THEN 'low'
-            WHEN stock_qty <= (reorder_level * 1.5) THEN 'watch'
+            WHEN stock_qty <= 10 THEN 'low'
+            WHEN stock_qty <= 50 THEN 'watch'
             ELSE 'healthy'
         END AS monitoring_status
     FROM inventory_items
     ORDER BY
         CASE
             WHEN stock_qty <= 0 THEN 0
-            WHEN stock_qty <= reorder_level THEN 1
-            WHEN stock_qty <= (reorder_level * 1.5) THEN 2
+            WHEN stock_qty <= 10 THEN 1
+            WHEN stock_qty <= 50 THEN 2
             ELSE 3
         END,
         stock_qty ASC,
@@ -305,7 +319,7 @@ if ($canAccessAccounting || $canAccessCrm || $canAccessSales) {
     LIMIT 5")->fetchAll() ?: [];
 
     if ($canAccessAccounting || $canAccessCrm) {
-        $trackedFlavorNames = ['Caramel Syrup', 'Hazelnut Syrup', 'Mocha Syrup'];
+        $trackedFlavorNames = ['Caramel Syrup', 'Matcha coffee Syrup', 'Spanish latte Syrup', 'Hazelnuts Syrup', 'Vanilla Syrup'];
         $crmTrackedFlavorIndex = [];
         foreach ($trackedFlavorNames as $trackedFlavorName) {
             $crmTrackedFlavorIndex[$trackedFlavorName] = [
@@ -529,6 +543,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Purchasing Department Dashboard</h3>
         <p class="text-sm text-slate-600">Statistical analytics of purchasing ingredients and inventory status.</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -556,6 +571,22 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="text-xs uppercase tracking-wide text-slate-600">Approved Total Cost</p>
             <p class="mt-1 text-xl font-black text-slate-900"><?= e(format_money($purchasingStats['approved_estimated_total'])) ?></p>
         </div>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-2">
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Purchase Request Status</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartPurchasingStatus"></canvas>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Top Purchasing Ingredients</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartPurchasingIngredients"></canvas>
+            </div>
+        </article>
     </div>
 
     <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -596,12 +627,16 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <p class="mt-1 text-xl font-black text-slate-900"><?= e((string) $inventoryStatusSnapshot['total_items']) ?></p>
             </div>
             <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <p class="text-xs uppercase tracking-wide text-emerald-700">Healthy Items</p>
+                <p class="text-xs uppercase tracking-wide text-emerald-700">Safe (&gt;50)</p>
                 <p class="mt-1 text-xl font-black text-emerald-700"><?= e((string) $inventoryStatusSnapshot['healthy_stock']) ?></p>
             </div>
             <div class="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <p class="text-xs uppercase tracking-wide text-amber-700">Low Stock</p>
-                <p class="mt-1 text-xl font-black text-amber-700"><?= e((string) $inventoryStatusSnapshot['low_stock']) ?></p>
+                <p class="text-xs uppercase tracking-wide text-amber-700">Watch (11–50)</p>
+                <p class="mt-1 text-xl font-black text-amber-700"><?= e((string) $inventoryStatusSnapshot['watch_stock']) ?></p>
+            </div>
+            <div class="rounded-xl border border-orange-200 bg-orange-50 p-3">
+                <p class="text-xs uppercase tracking-wide text-orange-700">Low Stock (≤10)</p>
+                <p class="mt-1 text-xl font-black text-orange-700"><?= e((string) $inventoryStatusSnapshot['low_stock']) ?></p>
             </div>
             <div class="rounded-xl border border-rose-200 bg-rose-50 p-3">
                 <p class="text-xs uppercase tracking-wide text-rose-700">Out of Stock</p>
@@ -621,9 +656,10 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Inventory Department Dashboard</h3>
         <p class="text-sm text-slate-600">Inventory status and inventory monitoring.</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p class="text-xs uppercase tracking-wide text-slate-500">Total Items</p>
             <p class="mt-1 text-xl font-black text-slate-900"><?= e((string) $inventoryStatusSnapshot['total_items']) ?></p>
@@ -633,17 +669,37 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="mt-1 text-xl font-black text-brand-700"><?= e((string) $inventoryStatusSnapshot['approved_items']) ?></p>
         </div>
         <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-            <p class="text-xs uppercase tracking-wide text-emerald-700">Healthy Items</p>
+            <p class="text-xs uppercase tracking-wide text-emerald-700">Safe (&gt;50)</p>
             <p class="mt-1 text-xl font-black text-emerald-700"><?= e((string) $inventoryStatusSnapshot['healthy_stock']) ?></p>
         </div>
         <div class="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <p class="text-xs uppercase tracking-wide text-amber-700">Low Stock</p>
-            <p class="mt-1 text-xl font-black text-amber-700"><?= e((string) $inventoryStatusSnapshot['low_stock']) ?></p>
+            <p class="text-xs uppercase tracking-wide text-amber-700">Watch (11–50)</p>
+            <p class="mt-1 text-xl font-black text-amber-700"><?= e((string) $inventoryStatusSnapshot['watch_stock']) ?></p>
+        </div>
+        <div class="rounded-xl border border-orange-200 bg-orange-50 p-3">
+            <p class="text-xs uppercase tracking-wide text-orange-700">Low Stock (≤10)</p>
+            <p class="mt-1 text-xl font-black text-orange-700"><?= e((string) $inventoryStatusSnapshot['low_stock']) ?></p>
         </div>
         <div class="rounded-xl border border-rose-200 bg-rose-50 p-3">
             <p class="text-xs uppercase tracking-wide text-rose-700">Out of Stock</p>
             <p class="mt-1 text-xl font-black text-rose-700"><?= e((string) $inventoryStatusSnapshot['out_of_stock']) ?></p>
         </div>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-2">
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Stock Health Distribution</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartInventoryHealth"></canvas>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Stock Qty vs Reorder Level (Top Items)</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartInventoryMonitoring"></canvas>
+            </div>
+        </article>
     </div>
 
     <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -665,16 +721,16 @@ require_once __DIR__ . '/includes/layout_top.php';
                         <?php
                         $monitoringStatus = (string) ($monitoringRow['monitoring_status'] ?? 'watch');
                         $monitoringClass = 'bg-amber-100 text-amber-700';
-                        $monitoringLabel = 'Watch';
+                        $monitoringLabel = 'Watch (11–50)';
                         if ($monitoringStatus === 'out') {
                             $monitoringClass = 'bg-rose-100 text-rose-700';
                             $monitoringLabel = 'Out of Stock';
                         } elseif ($monitoringStatus === 'low') {
                             $monitoringClass = 'bg-orange-100 text-orange-700';
-                            $monitoringLabel = 'Low Stock';
+                            $monitoringLabel = 'Low Stock (≤10)';
                         } elseif ($monitoringStatus === 'healthy') {
                             $monitoringClass = 'bg-emerald-100 text-emerald-700';
-                            $monitoringLabel = 'Healthy';
+                            $monitoringLabel = 'Safe (>50)';
                         }
                         ?>
                         <tr class="border-t border-slate-100">
@@ -700,6 +756,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Production Department Dashboard</h3>
         <p class="text-sm text-slate-600">Production logs, prepared quantity, and beverage output monitoring.</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -731,63 +788,77 @@ require_once __DIR__ . '/includes/layout_top.php';
 
     <div class="grid gap-4 xl:grid-cols-2">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h4 class="text-sm font-extrabold text-slate-900">Top Prepared Beverages</h4>
-            <div class="table-scroll mt-3">
-                <table class="stack-table w-full min-w-[420px] text-sm">
-                    <thead>
-                    <tr class="text-left text-slate-500">
-                        <th class="pb-2 pr-4" data-priority="high">Beverage</th>
-                        <th class="pb-2 pr-4" data-priority="high">Qty Prepared</th>
-                        <th class="pb-2" data-priority="medium">Logs</th>
-                    </tr>
-                    </thead>
-                    <tbody class="text-slate-700">
-                    <?php if ($productionTopBeverageRows): ?>
-                        <?php foreach ($productionTopBeverageRows as $productionBeverageRow): ?>
-                            <tr class="border-t border-slate-100">
-                                <td class="py-2 pr-4 font-semibold"><?= e((string) ($productionBeverageRow['beverage_name'] ?? '-')) ?></td>
-                                <td class="py-2 pr-4"><?= e(number_format((float) ($productionBeverageRow['total_qty_prepared'] ?? 0), 0)) ?></td>
-                                <td class="py-2"><?= e((string) ((int) ($productionBeverageRow['total_logs'] ?? 0))) ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php else: ?>
-                        <tr><td colspan="3" class="py-3 text-slate-500">No approved production beverage data for this <?= e(strtolower($rangeLabelMap[$range])) ?> view.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+            <h4 class="text-sm font-extrabold text-slate-900">Production Log Status</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartProductionStatus"></canvas>
             </div>
         </article>
 
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h4 class="text-sm font-extrabold text-slate-900">Recent Production Logs</h4>
-            <div class="table-scroll mt-3">
-                <table class="stack-table w-full min-w-[460px] text-sm">
-                    <thead>
-                    <tr class="text-left text-slate-500">
-                        <th class="pb-2 pr-4" data-priority="high">Beverage</th>
-                        <th class="pb-2 pr-4" data-priority="high">Qty</th>
-                        <th class="pb-2 pr-4" data-priority="medium">Status</th>
-                        <th class="pb-2" data-priority="low">Updated</th>
-                    </tr>
-                    </thead>
-                    <tbody class="text-slate-700">
-                    <?php if ($productionRecentRows): ?>
-                        <?php foreach ($productionRecentRows as $productionRecentRow): ?>
-                            <tr class="border-t border-slate-100">
-                                <td class="py-2 pr-4 font-semibold"><?= e((string) ($productionRecentRow['beverage_name'] ?? '-')) ?></td>
-                                <td class="py-2 pr-4"><?= e(number_format((float) ($productionRecentRow['quantity_prepared'] ?? 0), 0)) ?></td>
-                                <td class="py-2 pr-4"><?= e(ucfirst((string) ($productionRecentRow['status'] ?? '-'))) ?></td>
-                                <td class="py-2 text-xs text-slate-500"><?= e(format_table_value('updated_at', $productionRecentRow['updated_at'] ?? null)) ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php else: ?>
-                        <tr><td colspan="4" class="py-3 text-slate-500">No production logs for this <?= e(strtolower($rangeLabelMap[$range])) ?> view.</td></tr>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
+            <h4 class="text-sm font-extrabold text-slate-900">Top Beverages by Qty Prepared</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartProductionBeverages"></canvas>
             </div>
         </article>
     </div>
+
+    <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h4 class="text-sm font-extrabold text-slate-900">Top Beverages by Qty Prepared</h4>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[520px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-4" data-priority="high">Beverage</th>
+                    <th class="pb-2 pr-4" data-priority="high">Qty Prepared</th>
+                    <th class="pb-2" data-priority="medium">Logs</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($productionTopBeverageRows): ?>
+                    <?php foreach ($productionTopBeverageRows as $productionBeverageRow): ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-4 font-semibold"><?= e((string) ($productionBeverageRow['beverage_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-4"><?= e(number_format((float) ($productionBeverageRow['total_qty_prepared'] ?? 0), 0)) ?></td>
+                            <td class="py-2"><?= e((string) ((int) ($productionBeverageRow['total_logs'] ?? 0))) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="3" class="py-3 text-slate-500">No approved production beverage data for this <?= e(strtolower($rangeLabelMap[$range])) ?> view.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
+
+    <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h4 class="text-sm font-extrabold text-slate-900">Recent Production Logs</h4>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[460px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-4" data-priority="high">Beverage</th>
+                    <th class="pb-2 pr-4" data-priority="high">Qty</th>
+                    <th class="pb-2 pr-4" data-priority="medium">Status</th>
+                    <th class="pb-2" data-priority="low">Updated</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($productionRecentRows): ?>
+                    <?php foreach ($productionRecentRows as $productionRecentRow): ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-4 font-semibold"><?= e((string) ($productionRecentRow['beverage_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-4"><?= e(number_format((float) ($productionRecentRow['quantity_prepared'] ?? 0), 0)) ?></td>
+                            <td class="py-2 pr-4"><?= e(ucfirst((string) ($productionRecentRow['status'] ?? '-'))) ?></td>
+                            <td class="py-2 text-xs text-slate-500"><?= e(format_table_value('updated_at', $productionRecentRow['updated_at'] ?? null)) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="4" class="py-3 text-slate-500">No production logs for this <?= e(strtolower($rangeLabelMap[$range])) ?> view.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
 </section>
 <?php endif; ?>
 
@@ -796,6 +867,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Sales Department Dashboard</h3>
         <p class="text-sm text-slate-600">Approved POS performance, payment distribution, and recent sales activity.</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -820,6 +892,52 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="mt-1 text-xl font-black text-violet-700"><?= e((string) $salesDashboardSnapshot['unique_customers']) ?></p>
         </div>
     </div>
+
+    <div class="grid gap-4 xl:grid-cols-2">
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Revenue by Payment Method</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartSalesPayment"></canvas>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Top Beverages by Sales Qty</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartSalesBeverages"></canvas>
+            </div>
+        </article>
+    </div>
+
+    <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h4 class="text-sm font-extrabold text-slate-900">Top Beverages by Sales Qty</h4>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[520px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-4" data-priority="high">Beverage</th>
+                    <th class="pb-2 pr-4" data-priority="high">Qty Sold</th>
+                    <th class="pb-2 pr-4" data-priority="medium">Orders</th>
+                    <th class="pb-2" data-priority="medium">Revenue</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($highSalesCoffeeRows): ?>
+                    <?php foreach ($highSalesCoffeeRows as $salesBeverageRow): ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-4 font-semibold"><?= e((string) ($salesBeverageRow['beverage_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-4"><?= e(number_format((float) ($salesBeverageRow['total_qty'] ?? 0), 0)) ?></td>
+                            <td class="py-2 pr-4"><?= e((string) ((int) ($salesBeverageRow['total_orders'] ?? 0))) ?></td>
+                            <td class="py-2"><?= e(format_money((float) ($salesBeverageRow['total_revenue'] ?? 0))) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="4" class="py-3 text-slate-500">No approved sales beverage data for this <?= e(strtolower($rangeLabelMap[$range])) ?> view.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
 
     <div class="grid gap-4 xl:grid-cols-2">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -899,7 +1017,8 @@ require_once __DIR__ . '/includes/layout_top.php';
 <section class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Accounting Department Dashboard</h3>
-        <p class="text-sm text-slate-600">Sales summary with tracked syrup flavor analytics (Caramel, Hazelnut, Mocha).</p>
+        <p class="text-sm text-slate-600">Sales summary with tracked syrup flavor analytics (Caramel Syrup, Matcha coffee Syrup, Spanish latte Syrup, Hazelnuts Syrup, Vanilla Syrup).</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
     <div class="grid gap-3 sm:grid-cols-3">
@@ -915,6 +1034,22 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="text-xs uppercase tracking-wide text-brand-700">Sales Revenue</p>
             <p class="mt-1 text-xl font-black text-brand-700"><?= e(format_money($salesStats['total_revenue'])) ?></p>
         </div>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-2 mb-4">
+        <article class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-emerald-700">Tracked Syrup Flavor — Qty Sold</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartAccountingFlavorQty"></canvas>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-brand-200 bg-brand-50 p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-brand-700">Tracked Syrup Flavor — Revenue</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartAccountingFlavorRevenue"></canvas>
+            </div>
+        </article>
     </div>
 
     <div class="grid gap-4 xl:grid-cols-2">
@@ -982,6 +1117,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">CRM Department Dashboard</h3>
         <p class="text-sm text-slate-600">CRM coverage, flavor analytics, CRM summary output, sales trend leader, and automated digital promotion feed.</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
     <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1006,6 +1142,22 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <p class="mt-1 text-xl font-black text-amber-700"><?= e((string) max(0, $crmCoverageSnapshot['total_sales_orders'] - $crmCoverageSnapshot['covered_sales_orders'])) ?></p>
             </div>
         </div>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-2">
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Order & Customer Coverage</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartCrmCoverage"></canvas>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Tracked Syrup Flavor Comparison</h4>
+            <div class="mt-3" style="height:220px">
+                <canvas id="chartCrmFlavors"></canvas>
+            </div>
+        </article>
     </div>
 
     <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1153,6 +1305,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Marketing Department Dashboard</h3>
         <p class="text-sm text-slate-600">CRM coverage for campaign planning and audience reach.</p>
+        <?php $renderRangeFilters($range, $rangeLabelMap); ?>
     </div>
 
     <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1175,7 +1328,220 @@ require_once __DIR__ . '/includes/layout_top.php';
             <p class="mt-1 text-xl font-black text-amber-700"><?= e((string) max(0, $crmCoverageSnapshot['total_sales_orders'] - $crmCoverageSnapshot['covered_sales_orders'])) ?></p>
         </div>
     </div>
+
+    <div class="mt-4 grid gap-4 xl:grid-cols-2">
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Order Coverage vs Gap</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartMarketingOrderCoverage"></canvas>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 class="text-sm font-extrabold text-slate-900">Customer Coverage vs Gap</h4>
+            <div class="flex items-center justify-center mt-3" style="height:220px">
+                <canvas id="chartMarketingCustomerCoverage"></canvas>
+            </div>
+        </article>
+    </div>
 </section>
 <?php endif; ?>
+
+<script src="assets/vendor/chartjs/chart.umd.js"></script>
+<script>
+(function () {
+    'use strict';
+
+    const COLORS = {
+        emerald: '#10b981', emeraldLight: '#d1fae5',
+        amber:   '#f59e0b', amberLight:   '#fef3c7',
+        rose:    '#f43f5e', roseLight:    '#ffe4e6',
+        brand:   '#6366f1', brandLight:   '#ede9fe',
+        violet:  '#8b5cf6', violetLight:  '#ede9fe',
+        slate:   '#64748b', slateLight:   '#f1f5f9',
+        sky:     '#0ea5e9', skyLight:     '#e0f2fe',
+        orange:  '#f97316',
+    };
+
+    const CHART_DEFAULTS = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } } },
+    };
+
+    function doughnut(id, labels, data, colors) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        new Chart(el, {
+            type: 'doughnut',
+            data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 2 }] },
+            options: { ...CHART_DEFAULTS, cutout: '62%', plugins: { ...CHART_DEFAULTS.plugins } },
+        });
+    }
+
+    function bar(id, labels, datasets, opts) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        new Chart(el, {
+            type: 'bar',
+            data: { labels, datasets },
+            options: {
+                ...CHART_DEFAULTS,
+                indexAxis: opts?.horizontal ? 'y' : 'x',
+                scales: {
+                    x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+                    y: { ticks: { font: { size: 10 } }, grid: { color: '#f1f5f9' } },
+                },
+                plugins: { ...CHART_DEFAULTS.plugins, legend: { display: (datasets.length > 1), labels: { font: { size: 11 }, boxWidth: 12, padding: 10 } } },
+                ...opts?.extra,
+            },
+        });
+    }
+
+    /* ── PURCHASING ── */
+    <?php if ($canAccessPurchasing): ?>
+    doughnut(
+        'chartPurchasingStatus',
+        ['Approved', 'Pending', 'Rejected'],
+        [<?= (int)$purchasingStats['approved_requests'] ?>, <?= (int)$purchasingStats['pending_requests'] ?>, <?= (int)$purchasingStats['rejected_requests'] ?>],
+        [COLORS.emerald, COLORS.amber, COLORS.rose]
+    );
+
+    bar(
+        'chartPurchasingIngredients',
+        <?= json_encode(array_column($purchasingIngredientRows, 'ingredient_name')) ?>,
+        [
+            { label: 'Requested Qty', data: <?= json_encode(array_map(fn($r) => (float)($r['total_requested_qty'] ?? 0), $purchasingIngredientRows)) ?>, backgroundColor: COLORS.brandLight, borderColor: COLORS.brand, borderWidth: 1.5 },
+            { label: 'Approved Qty',  data: <?= json_encode(array_map(fn($r) => (float)($r['approved_requested_qty'] ?? 0), $purchasingIngredientRows)) ?>, backgroundColor: COLORS.emeraldLight, borderColor: COLORS.emerald, borderWidth: 1.5 },
+        ],
+        { horizontal: true }
+    );
+    <?php endif; ?>
+
+    /* ── INVENTORY ── */
+    <?php if ($canAccessInventory): ?>
+    doughnut(
+        'chartInventoryHealth',
+        ['Safe (>50)', 'Watch (11–50)', 'Low Stock (≤10)', 'Out of Stock'],
+        [<?= (int)$inventoryStatusSnapshot['healthy_stock'] ?>, <?= (int)$inventoryStatusSnapshot['watch_stock'] ?>, <?= (int)$inventoryStatusSnapshot['low_stock'] ?>, <?= (int)$inventoryStatusSnapshot['out_of_stock'] ?>],
+        [COLORS.emerald, COLORS.amber, COLORS.orange, COLORS.rose]
+    );
+
+    bar(
+        'chartInventoryMonitoring',
+        <?= json_encode(array_column(array_slice($inventoryMonitoringRows, 0, 8), 'item_name')) ?>,
+        [
+            { label: 'Stock Qty',     data: <?= json_encode(array_map(fn($r) => (float)($r['stock_qty'] ?? 0), array_slice($inventoryMonitoringRows, 0, 8))) ?>, backgroundColor: COLORS.brandLight, borderColor: COLORS.brand, borderWidth: 1.5 },
+            { label: 'Reorder Level', data: <?= json_encode(array_map(fn($r) => (float)($r['reorder_level'] ?? 0), array_slice($inventoryMonitoringRows, 0, 8))) ?>, backgroundColor: COLORS.amberLight, borderColor: COLORS.amber, borderWidth: 1.5 },
+        ],
+        { horizontal: true }
+    );
+    <?php endif; ?>
+
+    /* ── PRODUCTION ── */
+    <?php if ($canAccessProduction): ?>
+    doughnut(
+        'chartProductionStatus',
+        ['Approved', 'Pending', 'Rejected'],
+        [<?= (int)$productionStats['approved_logs'] ?>, <?= (int)$productionStats['pending_logs'] ?>, <?= (int)$productionStats['rejected_logs'] ?>],
+        [COLORS.emerald, COLORS.amber, COLORS.rose]
+    );
+
+    bar(
+        'chartProductionBeverages',
+        <?= json_encode(array_column($productionTopBeverageRows, 'beverage_name')) ?>,
+        [
+            { label: 'Qty Prepared', data: <?= json_encode(array_map(fn($r) => (float)($r['total_qty_prepared'] ?? 0), $productionTopBeverageRows)) ?>, backgroundColor: COLORS.violetLight, borderColor: COLORS.violet, borderWidth: 1.5 },
+        ],
+        { horizontal: true }
+    );
+    <?php endif; ?>
+
+    /* ── SALES ── */
+    <?php if ($canAccessSales): ?>
+    doughnut(
+        'chartSalesPayment',
+        <?= json_encode(array_map(fn($r) => ucfirst((string)($r['payment_method'] ?? '-')), $salesPaymentRows)) ?>,
+        <?= json_encode(array_map(fn($r) => (float)($r['total_revenue'] ?? 0), $salesPaymentRows)) ?>,
+        [COLORS.brand, COLORS.emerald, COLORS.amber, COLORS.violet, COLORS.sky, COLORS.rose]
+    );
+
+    bar(
+        'chartSalesBeverages',
+        <?= json_encode(array_column($highSalesCoffeeRows, 'beverage_name')) ?>,
+        [
+            { label: 'Qty Sold', data: <?= json_encode(array_map(fn($r) => (float)($r['total_qty'] ?? 0), $highSalesCoffeeRows)) ?>, backgroundColor: COLORS.brandLight, borderColor: COLORS.brand, borderWidth: 1.5 },
+        ],
+        { horizontal: true }
+    );
+    <?php endif; ?>
+
+    /* ── ACCOUNTING ── */
+    <?php if ($canAccessAccounting): ?>
+    (function () {
+        const labels = <?= json_encode(array_column($crmTrackedFlavorRows, 'flavor_name')) ?>;
+        const bgColors = [COLORS.emeraldLight, COLORS.amberLight, COLORS.brandLight];
+        const borderColors = [COLORS.emerald, COLORS.amber, COLORS.brand];
+
+        bar('chartAccountingFlavorQty',
+            labels,
+            [{ label: 'Qty Sold', data: <?= json_encode(array_map(fn($r) => round((float)($r['total_qty'] ?? 0), 2), $crmTrackedFlavorRows)) ?>, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1.5 }],
+            {}
+        );
+        bar('chartAccountingFlavorRevenue',
+            labels,
+            [{ label: 'Revenue (₱)', data: <?= json_encode(array_map(fn($r) => round((float)($r['total_revenue'] ?? 0), 2), $crmTrackedFlavorRows)) ?>, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1.5 }],
+            {}
+        );
+    })();
+    <?php endif; ?>
+
+    /* ── CRM ── */
+    <?php if ($canAccessCrm): ?>
+    (function () {
+        const coveredOrders   = <?= (int)$crmCoverageSnapshot['covered_sales_orders'] ?>;
+        const uncoveredOrders = Math.max(0, <?= (int)$crmCoverageSnapshot['total_sales_orders'] ?> - coveredOrders);
+        const coveredCusts    = <?= (int)$crmCoverageSnapshot['covered_sales_customers'] ?>;
+        const uncoveredCusts  = Math.max(0, <?= (int)$crmCoverageSnapshot['total_sales_customers'] ?> - coveredCusts);
+
+        doughnut('chartCrmCoverage',
+            ['Covered Orders', 'Uncovered Orders', 'Covered Customers', 'Uncovered Customers'],
+            [coveredOrders, uncoveredOrders, coveredCusts, uncoveredCusts],
+            [COLORS.brand, COLORS.brandLight, COLORS.emerald, COLORS.emeraldLight]
+        );
+
+        bar('chartCrmFlavors',
+            <?= json_encode(array_column($crmHighTrackedFlavorRows, 'flavor_name')) ?>,
+            [
+                { label: 'Qty Sold',    data: <?= json_encode(array_map(fn($r) => round((float)($r['total_qty'] ?? 0), 2), $crmHighTrackedFlavorRows)) ?>, backgroundColor: COLORS.emeraldLight, borderColor: COLORS.emerald, borderWidth: 1.5 },
+                { label: 'Revenue (₱)', data: <?= json_encode(array_map(fn($r) => round((float)($r['total_revenue'] ?? 0), 2), $crmHighTrackedFlavorRows)) ?>, backgroundColor: COLORS.brandLight,   borderColor: COLORS.brand,   borderWidth: 1.5 },
+            ],
+            {}
+        );
+    })();
+    <?php endif; ?>
+
+    /* ── MARKETING ── */
+    <?php if ($canAccessMarketing): ?>
+    (function () {
+        const covOrders  = <?= (int)$crmCoverageSnapshot['covered_sales_orders'] ?>;
+        const gapOrders  = Math.max(0, <?= (int)$crmCoverageSnapshot['total_sales_orders'] ?> - covOrders);
+        const covCusts   = <?= (int)$crmCoverageSnapshot['covered_sales_customers'] ?>;
+        const gapCusts   = Math.max(0, <?= (int)$crmCoverageSnapshot['total_sales_customers'] ?> - covCusts);
+
+        doughnut('chartMarketingOrderCoverage',
+            ['Covered', 'Gap'],
+            [covOrders, gapOrders],
+            [COLORS.brand, COLORS.slateLight]
+        );
+        doughnut('chartMarketingCustomerCoverage',
+            ['Covered', 'Gap'],
+            [covCusts, gapCusts],
+            [COLORS.emerald, COLORS.slateLight]
+        );
+    })();
+    <?php endif; ?>
+})();
+</script>
 
 <?php require_once __DIR__ . '/includes/layout_bottom.php'; ?>

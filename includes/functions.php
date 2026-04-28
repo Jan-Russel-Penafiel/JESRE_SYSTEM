@@ -107,6 +107,95 @@ function can_user_access_department(array $user, string $departmentKey): bool
     return ($user['role'] ?? null) === ROLE_DEPARTMENT_HEAD && ($user['department'] ?? '') === $departmentKey;
 }
 
+function fetch_active_beverage_recipes(PDO $pdo): array
+{
+    $rows = $pdo->query("SELECT
+            br.beverage_name,
+            bri.required_qty,
+            i.item_name,
+            i.unit
+        FROM beverage_recipes br
+        LEFT JOIN beverage_recipe_items bri ON bri.recipe_id = br.id
+        LEFT JOIN inventory_items i ON i.id = bri.inventory_item_id
+        WHERE br.status = 'active'
+        ORDER BY br.beverage_name ASC, i.item_name ASC")
+        ->fetchAll();
+
+    if (!$rows) {
+        return [];
+    }
+
+    $recipes = [];
+    foreach ($rows as $row) {
+        $recipeName = (string) ($row['beverage_name'] ?? '');
+        if ($recipeName === '') {
+            continue;
+        }
+
+        if (!isset($recipes[$recipeName])) {
+            $recipes[$recipeName] = [
+                'beverage_name' => $recipeName,
+                'ingredients' => [],
+            ];
+        }
+
+        $itemName = trim((string) ($row['item_name'] ?? ''));
+        if ($itemName === '') {
+            continue;
+        }
+
+        $requiredQty = (float) ($row['required_qty'] ?? 0);
+        $qtyLabel = number_format($requiredQty, 2);
+        $unit = trim((string) ($row['unit'] ?? ''));
+        $ingredientLabel = $itemName . ' ' . $qtyLabel;
+        if ($unit !== '') {
+            $ingredientLabel .= ' ' . $unit;
+        }
+
+        $recipes[$recipeName]['ingredients'][] = $ingredientLabel;
+    }
+
+    $results = [];
+    foreach ($recipes as $recipe) {
+        $ingredients = $recipe['ingredients'];
+        $recipe['ingredients_label'] = $ingredients !== []
+            ? 'Ingredients: ' . implode(', ', $ingredients)
+            : 'Ingredients: Not set';
+        unset($recipe['ingredients']);
+        $results[] = $recipe;
+    }
+
+    return $results;
+}
+
+function fetch_recipe_items_by_beverage(PDO $pdo, string $beverageName): array
+{
+    $normalizedName = trim($beverageName);
+    if ($normalizedName === '') {
+        return [];
+    }
+
+    $recipeStmt = $pdo->prepare("SELECT id FROM beverage_recipes WHERE status = 'active' AND LOWER(beverage_name) = LOWER(?) LIMIT 1");
+    $recipeStmt->execute([$normalizedName]);
+    $recipeId = (int) ($recipeStmt->fetchColumn() ?: 0);
+    if ($recipeId <= 0) {
+        return [];
+    }
+
+    $itemsStmt = $pdo->prepare("SELECT
+            bri.inventory_item_id,
+            bri.required_qty,
+            i.item_name,
+            i.unit
+        FROM beverage_recipe_items bri
+        JOIN inventory_items i ON i.id = bri.inventory_item_id
+        WHERE bri.recipe_id = ?
+        ORDER BY i.item_name ASC");
+    $itemsStmt->execute([$recipeId]);
+
+    return $itemsStmt->fetchAll() ?: [];
+}
+
 function fetch_sales_trend_snapshot(PDO $pdo, int $days = 7): array
 {
     $days = max(1, $days);
@@ -453,6 +542,28 @@ function validate_department_input(array $departmentConfig, array $source): arra
             }
 
             $data[$name] = $customerName;
+            continue;
+        }
+
+        if ($type === 'recipe_select') {
+            $recipeName = trim((string) $raw);
+
+            if ($recipeName === '' && !$required) {
+                $data[$name] = null;
+                continue;
+            }
+
+            if ($recipeName === '') {
+                $errors[] = $field['label'] . ' is required.';
+                continue;
+            }
+
+            if (strlen($recipeName) > 120) {
+                $errors[] = $field['label'] . ' must be 120 characters or less.';
+                continue;
+            }
+
+            $data[$name] = $recipeName;
             continue;
         }
 

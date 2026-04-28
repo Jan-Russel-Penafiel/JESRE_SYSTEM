@@ -42,6 +42,28 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     CONSTRAINT fk_inventory_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS beverage_recipes (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    beverage_name VARCHAR(120) NOT NULL,
+    status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_beverage_recipe_name (beverage_name),
+    INDEX idx_beverage_recipe_status (status)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS beverage_recipe_items (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    recipe_id INT UNSIGNED NOT NULL,
+    inventory_item_id INT UNSIGNED NOT NULL,
+    required_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+    INDEX idx_recipe_items_recipe (recipe_id),
+    INDEX idx_recipe_items_inventory (inventory_item_id),
+    CONSTRAINT fk_recipe_items_recipe FOREIGN KEY (recipe_id) REFERENCES beverage_recipes (id) ON DELETE CASCADE,
+    CONSTRAINT fk_recipe_items_inventory FOREIGN KEY (inventory_item_id) REFERENCES inventory_items (id) ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS purchase_requests (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     request_code VARCHAR(40) NOT NULL UNIQUE,
@@ -257,16 +279,20 @@ SELECT 'Caramel Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @i
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Caramel Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Matcha coffee Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Matcha coffee Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Spanish latte Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Spanish latte Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
+SELECT 'Hazelnuts Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Hazelnuts Syrup');
+
+INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
 SELECT 'Vanilla Syrup', 'bottle', 30.00, 10.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Vanilla Syrup');
-
-INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Hazelnut Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
-WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Hazelnut Syrup');
-
-INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
-SELECT 'Mocha Syrup', 'bottle', 10.00, 2.00, 'Flavoring stock', 'approved', @inv_head_id, @gm_id, NOW()
-WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Mocha Syrup');
 
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
 SELECT 'Cup', 'pcs', 200.00, 50.00, 'Utility cup stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
@@ -275,3 +301,279 @@ WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Cup');
 INSERT INTO inventory_items (item_name, unit, stock_qty, reorder_level, notes, status, submitted_by, approved_by, approved_at)
 SELECT 'Straw', 'pcs', 200.00, 50.00, 'Utility straw stock for Sales POS deductions', 'approved', @inv_head_id, @gm_id, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM inventory_items WHERE item_name = 'Straw');
+
+INSERT INTO beverage_recipes (beverage_name, status, notes)
+SELECT 'Caramel Macchiato', 'active', 'Standard recipe'
+WHERE NOT EXISTS (SELECT 1 FROM beverage_recipes WHERE beverage_name = 'Caramel Macchiato');
+
+INSERT INTO beverage_recipes (beverage_name, status, notes)
+SELECT 'Spanish Latte', 'active', 'Standard recipe'
+WHERE NOT EXISTS (SELECT 1 FROM beverage_recipes WHERE beverage_name = 'Spanish Latte');
+
+INSERT INTO beverage_recipes (beverage_name, status, notes)
+SELECT 'Matcha coffee', 'active', 'Standard recipe'
+WHERE NOT EXISTS (SELECT 1 FROM beverage_recipes WHERE beverage_name = 'Matcha coffee');
+
+INSERT INTO beverage_recipes (beverage_name, status, notes)
+SELECT 'Hazelnuts coffee', 'active', 'Standard recipe'
+WHERE NOT EXISTS (SELECT 1 FROM beverage_recipes WHERE beverage_name = 'Hazelnuts coffee');
+
+INSERT INTO beverage_recipes (beverage_name, status, notes)
+SELECT 'Vanilla coffee', 'active', 'Standard recipe'
+WHERE NOT EXISTS (SELECT 1 FROM beverage_recipes WHERE beverage_name = 'Vanilla coffee');
+
+SET @caramel_recipe_id = (SELECT id FROM beverage_recipes WHERE beverage_name = 'Caramel Macchiato' LIMIT 1);
+SET @spanish_recipe_id = (SELECT id FROM beverage_recipes WHERE beverage_name = 'Spanish Latte' LIMIT 1);
+SET @matcha_recipe_id = (SELECT id FROM beverage_recipes WHERE beverage_name = 'Matcha coffee' LIMIT 1);
+SET @hazelnuts_recipe_id = (SELECT id FROM beverage_recipes WHERE beverage_name = 'Hazelnuts coffee' LIMIT 1);
+SET @vanilla_recipe_id = (SELECT id FROM beverage_recipes WHERE beverage_name = 'Vanilla coffee' LIMIT 1);
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @caramel_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Milk'
+    AND @caramel_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @caramel_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @caramel_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Caramel Syrup'
+    AND @caramel_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @caramel_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @caramel_recipe_id, i.id, 0.13
+FROM inventory_items i
+WHERE i.item_name = 'Coffee Beans'
+    AND @caramel_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @caramel_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @caramel_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Cup'
+    AND @caramel_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @caramel_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @caramel_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Straw'
+    AND @caramel_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @caramel_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @spanish_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Milk'
+    AND @spanish_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @spanish_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @spanish_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Spanish latte Syrup'
+    AND @spanish_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @spanish_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @spanish_recipe_id, i.id, 0.13
+FROM inventory_items i
+WHERE i.item_name = 'Coffee Beans'
+    AND @spanish_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @spanish_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @spanish_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Cup'
+    AND @spanish_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @spanish_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @spanish_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Straw'
+    AND @spanish_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+            SELECT 1 FROM beverage_recipe_items bri
+            WHERE bri.recipe_id = @spanish_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @matcha_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Milk'
+    AND @matcha_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @matcha_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @matcha_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Caramel Syrup'
+    AND @matcha_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @matcha_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @matcha_recipe_id, i.id, 0.13
+FROM inventory_items i
+WHERE i.item_name = 'Coffee Beans'
+    AND @matcha_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @matcha_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @matcha_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Cup'
+    AND @matcha_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @matcha_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @matcha_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Straw'
+    AND @matcha_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @matcha_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @hazelnuts_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Milk'
+    AND @hazelnuts_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @hazelnuts_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @hazelnuts_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Caramel Syrup'
+    AND @hazelnuts_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @hazelnuts_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @hazelnuts_recipe_id, i.id, 0.13
+FROM inventory_items i
+WHERE i.item_name = 'Coffee Beans'
+    AND @hazelnuts_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @hazelnuts_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @hazelnuts_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Cup'
+    AND @hazelnuts_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @hazelnuts_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @hazelnuts_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Straw'
+    AND @hazelnuts_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @hazelnuts_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @vanilla_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Milk'
+    AND @vanilla_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @vanilla_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @vanilla_recipe_id, i.id, 0.10
+FROM inventory_items i
+WHERE i.item_name = 'Caramel Syrup'
+    AND @vanilla_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @vanilla_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @vanilla_recipe_id, i.id, 0.13
+FROM inventory_items i
+WHERE i.item_name = 'Coffee Beans'
+    AND @vanilla_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @vanilla_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @vanilla_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Cup'
+    AND @vanilla_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @vanilla_recipe_id AND bri.inventory_item_id = i.id
+    );
+
+INSERT INTO beverage_recipe_items (recipe_id, inventory_item_id, required_qty)
+SELECT @vanilla_recipe_id, i.id, 1.00
+FROM inventory_items i
+WHERE i.item_name = 'Straw'
+    AND @vanilla_recipe_id IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM beverage_recipe_items bri
+        WHERE bri.recipe_id = @vanilla_recipe_id AND bri.inventory_item_id = i.id
+    );

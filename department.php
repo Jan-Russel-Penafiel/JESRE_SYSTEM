@@ -206,9 +206,10 @@ if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
 
     $priorityFlavorOrder = [
         'caramel syrup' => 0,
-        'hazelnut syrup' => 1,
-        'mocha syrup' => 2,
-        'vanilla syrup' => 3,
+        'matcha coffee syrup' => 1,
+        'spanish latte syrup' => 2,
+        'hazelnuts syrup' => 3,
+        'vanilla syrup' => 4,
     ];
 
     usort($approvedIngredientItems, static function (array $left, array $right) use ($priorityFlavorOrder): int {
@@ -223,6 +224,11 @@ if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
 
         return strnatcasecmp((string) ($left['item_name'] ?? ''), (string) ($right['item_name'] ?? ''));
     });
+}
+
+$recipeOptions = [];
+if (in_array($department, ['production', 'sales'], true)) {
+    $recipeOptions = fetch_active_beverage_recipes($pdo);
 }
 
 if ($department === 'sales') {
@@ -568,6 +574,23 @@ require_once __DIR__ . '/includes/layout_top.php';
                                 <option value="<?= e((string) $optionValue) ?>"><?= e((string) $optionLabel) ?></option>
                             <?php endforeach; ?>
                         </select>
+                    <?php elseif ($fieldType === 'recipe_select'): ?>
+                        <?php if ($recipeOptions === []): ?>
+                            <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                                <p class="text-xs font-semibold text-rose-600">No active beverage recipes available. Add recipes to enable production and sales entry.</p>
+                            </div>
+                        <?php else: ?>
+                            <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?> data-recipe-tooltip>
+                                <option value="">Select beverage recipe</option>
+                                <?php foreach ($recipeOptions as $recipeOption): ?>
+                                    <?php
+                                    $recipeName = (string) ($recipeOption['beverage_name'] ?? '');
+                                    $ingredientsTooltip = (string) ($recipeOption['ingredients_label'] ?? 'Ingredients: Not set');
+                                    ?>
+                                    <option value="<?= e($recipeName) ?>" title="<?= e($ingredientsTooltip) ?>" data-ingredients="<?= e($ingredientsTooltip) ?>"><?= e($recipeName) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php endif; ?>
                     <?php elseif ($fieldType === 'inventory_select'): ?>
                         <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
                             <option value="">Select inventory item</option>
@@ -591,7 +614,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <?php elseif ($fieldType === 'inventory_multi_select'): ?>
                         <?php
                         $selectionGroupId = 'create-' . $fieldName;
-                        $syrupNames = ['caramel syrup', 'hazelnut syrup', 'mocha syrup', 'vanilla syrup'];
+                        $syrupNames = ['caramel syrup', 'matcha coffee syrup', 'spanish latte syrup', 'hazelnuts syrup', 'vanilla syrup'];
                         $syrupItems = [];
                         $nonSyrupItems = [];
                         foreach ($approvedIngredientItems as $item) {
@@ -764,6 +787,23 @@ require_once __DIR__ . '/includes/layout_top.php';
                                         <option value="<?= e((string) $optionValue) ?>" <?= (string) $value === (string) $optionValue ? 'selected' : '' ?>><?= e((string) $optionLabel) ?></option>
                                     <?php endforeach; ?>
                                 </select>
+                            <?php elseif ($fieldType === 'recipe_select'): ?>
+                                <?php if ($recipeOptions === []): ?>
+                                    <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                                        <p class="text-xs font-semibold text-rose-600">No active beverage recipes available. Add recipes to enable production and sales entry.</p>
+                                    </div>
+                                <?php else: ?>
+                                    <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?> data-recipe-tooltip>
+                                        <option value="">Select beverage recipe</option>
+                                        <?php foreach ($recipeOptions as $recipeOption): ?>
+                                            <?php
+                                            $recipeName = (string) ($recipeOption['beverage_name'] ?? '');
+                                            $ingredientsTooltip = (string) ($recipeOption['ingredients_label'] ?? 'Ingredients: Not set');
+                                            ?>
+                                            <option value="<?= e($recipeName) ?>" title="<?= e($ingredientsTooltip) ?>" data-ingredients="<?= e($ingredientsTooltip) ?>" <?= (string) $value === $recipeName ? 'selected' : '' ?>><?= e($recipeName) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <?php endif; ?>
                             <?php elseif ($fieldType === 'inventory_select'): ?>
                                 <select name="<?= e($fieldName) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $required ? 'required' : '' ?>>
                                     <option value="">Select inventory item</option>
@@ -787,7 +827,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                             <?php elseif ($fieldType === 'inventory_multi_select'): ?>
                                 <?php
                                 $selectionGroupId = 'edit-' . $rowId . '-' . $fieldName;
-                                $syrupNames = ['caramel syrup', 'hazelnut syrup', 'mocha syrup', 'vanilla syrup'];
+                                $syrupNames = ['caramel syrup', 'matcha coffee syrup', 'spanish latte syrup', 'hazelnuts syrup', 'vanilla syrup'];
                                 $syrupItems = [];
                                 $nonSyrupItems = [];
                                 foreach ($approvedIngredientItems as $item) {

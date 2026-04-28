@@ -242,6 +242,49 @@ $excludeUtilityIngredientIds = static function (PDO $db, array $inventoryItemIds
     }));
 };
 
+$buildRecipeIngredientIds = static function (array $recipeItems): array {
+    $ids = [];
+    foreach ($recipeItems as $recipeItem) {
+        $inventoryItemId = (int) ($recipeItem['inventory_item_id'] ?? 0);
+        if ($inventoryItemId > 0) {
+            $ids[$inventoryItemId] = $inventoryItemId;
+        }
+    }
+
+    return array_values($ids);
+};
+
+$ensureRecipeIngredientAvailability = static function (
+    PDO $db,
+    array $recipeItems,
+    float $multiplier,
+    int $actorId,
+    string $contextLabel
+) use ($ensureInventoryRequestAvailability): void {
+    if ($recipeItems === []) {
+        throw new RuntimeException('No active recipe configured for ' . $contextLabel . '.');
+    }
+
+    foreach ($recipeItems as $recipeItem) {
+        $inventoryItemId = (int) ($recipeItem['inventory_item_id'] ?? 0);
+        $requiredQty = (float) ($recipeItem['required_qty'] ?? 0) * $multiplier;
+        $itemName = (string) ($recipeItem['item_name'] ?? 'ingredient');
+
+        $ensureInventoryRequestAvailability(
+            $db,
+            $inventoryItemId,
+            $requiredQty,
+            $actorId,
+            'Recipe ingredient selection is required.',
+            'Recipe ingredient ' . $itemName . ' does not exist.',
+            'Recipe ingredient ' . $itemName . ' is not approved yet.',
+            'Recipe ingredient quantity must be greater than zero.',
+            $itemName . ' is unavailable. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Inventory Department received a low-stock update from ' . $contextLabel . ' recipe consumption (' . $itemName . ').'
+        );
+    }
+};
+
 $ensureSalesFlavorAvailability = static function (
     PDO $db,
     array $inventoryItemIds,
@@ -616,10 +659,35 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
     }
 
     if ($dept === 'production') {
-        $selectedIngredientIds = inventory_item_ids_from_record($record);
         $quantityPrepared = (float) ($record['quantity_prepared'] ?? 0);
 
-        if ($selectedIngredientIds === [] || $quantityPrepared <= 0) {
+        if ($quantityPrepared <= 0) {
+            throw new RuntimeException('Production approval requires a valid quantity prepared.');
+        }
+
+        $recipeItems = fetch_recipe_items_by_beverage($db, (string) ($record['beverage_name'] ?? ''));
+        if ($recipeItems !== []) {
+            foreach ($recipeItems as $recipeItem) {
+                $inventoryItemId = (int) ($recipeItem['inventory_item_id'] ?? 0);
+                $requiredQty = (float) ($recipeItem['required_qty'] ?? 0) * $quantityPrepared;
+                if ($inventoryItemId <= 0 || $requiredQty <= 0) {
+                    continue;
+                }
+
+                $deductInventory(
+                    $db,
+                    $inventoryItemId,
+                    $requiredQty,
+                    $approverId,
+                    'Auto-deducted recipe usage from approved production log #' . (int) $record['id']
+                );
+            }
+
+            return;
+        }
+
+        $selectedIngredientIds = inventory_item_ids_from_record($record);
+        if ($selectedIngredientIds === []) {
             throw new RuntimeException('Production approval requires ingredient selections and quantity prepared.');
         }
 
@@ -641,53 +709,76 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
     }
 
     $quantity = (float) ($record['quantity'] ?? 0);
-    $selectedIngredientIds = inventory_item_ids_from_record($record);
-    $totalIngredientDeduction = $quantity;
-
-    if ($selectedIngredientIds === [] || $totalIngredientDeduction <= 0) {
-        throw new RuntimeException('Sales approval requires ingredient selections and quantity.');
+    if ($quantity <= 0) {
+        throw new RuntimeException('Sales approval requires a valid quantity.');
     }
 
-    foreach ($selectedIngredientIds as $inventoryItemId) {
-        $deductInventory(
-            $db,
-            $inventoryItemId,
-            $totalIngredientDeduction,
-            $approverId,
-            'Auto-deducted stock from approved sales order #' . (int) $record['id']
-        );
-    }
+    $recipeItems = fetch_recipe_items_by_beverage($db, (string) ($record['beverage_name'] ?? ''));
+    if ($recipeItems !== []) {
+        foreach ($recipeItems as $recipeItem) {
+            $inventoryItemId = (int) ($recipeItem['inventory_item_id'] ?? 0);
+            $requiredQty = (float) ($recipeItem['required_qty'] ?? 0) * $quantity;
+            if ($inventoryItemId <= 0 || $requiredQty <= 0) {
+                continue;
+            }
 
-    $cupRequiredQty = $quantity;
-    if ($cupRequiredQty > 0) {
-        $cupInventoryItemId = $resolveInventoryUtilityItemId($db, 'cup');
-        if ($cupInventoryItemId <= 0) {
-            throw new RuntimeException('Cup inventory item is not configured or approved.');
+            $deductInventory(
+                $db,
+                $inventoryItemId,
+                $requiredQty,
+                $approverId,
+                'Auto-deducted recipe usage from approved sales order #' . (int) $record['id']
+            );
+        }
+    } else {
+        $selectedIngredientIds = inventory_item_ids_from_record($record);
+        $totalIngredientDeduction = $quantity;
+
+        if ($selectedIngredientIds === [] || $totalIngredientDeduction <= 0) {
+            throw new RuntimeException('Sales approval requires ingredient selections and quantity.');
         }
 
-        $deductInventory(
-            $db,
-            $cupInventoryItemId,
-            $cupRequiredQty,
-            $approverId,
-            'Auto-deducted cup usage from approved sales order #' . (int) $record['id']
-        );
-    }
-
-    $strawRequiredQty = $quantity;
-    if ($strawRequiredQty > 0) {
-        $strawInventoryItemId = $resolveInventoryUtilityItemId($db, 'straw');
-        if ($strawInventoryItemId <= 0) {
-            throw new RuntimeException('Straw inventory item is not configured or approved.');
+        foreach ($selectedIngredientIds as $inventoryItemId) {
+            $deductInventory(
+                $db,
+                $inventoryItemId,
+                $totalIngredientDeduction,
+                $approverId,
+                'Auto-deducted stock from approved sales order #' . (int) $record['id']
+            );
         }
 
-        $deductInventory(
-            $db,
-            $strawInventoryItemId,
-            $strawRequiredQty,
-            $approverId,
-            'Auto-deducted straw usage from approved sales order #' . (int) $record['id']
-        );
+        $cupRequiredQty = $quantity;
+        if ($cupRequiredQty > 0) {
+            $cupInventoryItemId = $resolveInventoryUtilityItemId($db, 'cup');
+            if ($cupInventoryItemId <= 0) {
+                throw new RuntimeException('Cup inventory item is not configured or approved.');
+            }
+
+            $deductInventory(
+                $db,
+                $cupInventoryItemId,
+                $cupRequiredQty,
+                $approverId,
+                'Auto-deducted cup usage from approved sales order #' . (int) $record['id']
+            );
+        }
+
+        $strawRequiredQty = $quantity;
+        if ($strawRequiredQty > 0) {
+            $strawInventoryItemId = $resolveInventoryUtilityItemId($db, 'straw');
+            if ($strawInventoryItemId <= 0) {
+                throw new RuntimeException('Straw inventory item is not configured or approved.');
+            }
+
+            $deductInventory(
+                $db,
+                $strawInventoryItemId,
+                $strawRequiredQty,
+                $approverId,
+                'Auto-deducted straw usage from approved sales order #' . (int) $record['id']
+            );
+        }
     }
 
     $orderCode = (string) ($record['order_code'] ?? ('ORDER-' . (int) $record['id']));
@@ -831,13 +922,16 @@ try {
 
         $selectedProductionIngredientIds = [];
         $selectedSalesIngredientIds = [];
+        $productionRecipeItems = [];
+        $salesRecipeItems = [];
 
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
             $data['ingredient_used_qty'] = (float) ($data['quantity_prepared'] ?? 0);
-            $selectedProductionIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
+            $productionRecipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($data['beverage_name'] ?? ''));
+            $selectedProductionIngredientIds = $buildRecipeIngredientIds($productionRecipeItems);
             if ($selectedProductionIngredientIds === []) {
-                throw new RuntimeException('Please select ingredient items for this production request.');
+                throw new RuntimeException('No active recipe configured for this beverage.');
             }
 
             $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedProductionIngredientIds);
@@ -859,9 +953,10 @@ try {
             $data['per_straw_qty'] = 1.0;
             $data['stock_deduct_qty'] = 1.0;
 
-            $selectedSalesIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
+            $salesRecipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($data['beverage_name'] ?? ''));
+            $selectedSalesIngredientIds = $buildRecipeIngredientIds($salesRecipeItems);
             if ($selectedSalesIngredientIds === []) {
-                throw new RuntimeException('Please select ingredient items for this order.');
+                throw new RuntimeException('No active recipe configured for this beverage.');
             }
 
             $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
@@ -891,20 +986,22 @@ try {
         $columnSql = implode(', ', $columns);
 
         if ($department === 'sales') {
-            $ensureSalesFlavorAvailability(
+            $ensureRecipeIngredientAvailability(
                 $pdo,
-                $selectedSalesIngredientIds,
+                $salesRecipeItems,
                 (float) ($data['quantity'] ?? 0),
-                (int) ($user['id'] ?? 0)
+                (int) ($user['id'] ?? 0),
+                'sales order'
             );
         }
 
         if ($department === 'production') {
-            $ensureProductionIngredientAvailability(
+            $ensureRecipeIngredientAvailability(
                 $pdo,
-                $selectedProductionIngredientIds,
+                $productionRecipeItems,
                 (float) ($data['quantity_prepared'] ?? 0),
-                (int) ($user['id'] ?? 0)
+                (int) ($user['id'] ?? 0),
+                'production log'
             );
         }
 
@@ -1003,13 +1100,16 @@ try {
 
         $selectedProductionIngredientIds = [];
         $selectedSalesIngredientIds = [];
+        $productionRecipeItems = [];
+        $salesRecipeItems = [];
 
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
             $data['ingredient_used_qty'] = (float) ($data['quantity_prepared'] ?? 0);
-            $selectedProductionIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
+            $productionRecipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($data['beverage_name'] ?? ''));
+            $selectedProductionIngredientIds = $buildRecipeIngredientIds($productionRecipeItems);
             if ($selectedProductionIngredientIds === []) {
-                throw new RuntimeException('Please select ingredient items for this production request.');
+                throw new RuntimeException('No active recipe configured for this beverage.');
             }
 
             $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedProductionIngredientIds);
@@ -1054,20 +1154,22 @@ try {
         }
 
         if ($department === 'sales') {
-            $ensureSalesFlavorAvailability(
+            $ensureRecipeIngredientAvailability(
                 $pdo,
-                $selectedSalesIngredientIds,
+                $salesRecipeItems,
                 (float) ($data['quantity'] ?? 0),
-                (int) ($user['id'] ?? 0)
+                (int) ($user['id'] ?? 0),
+                'sales order'
             );
         }
 
         if ($department === 'production') {
-            $ensureProductionIngredientAvailability(
+            $ensureRecipeIngredientAvailability(
                 $pdo,
-                $selectedProductionIngredientIds,
+                $productionRecipeItems,
                 (float) ($data['quantity_prepared'] ?? 0),
-                (int) ($user['id'] ?? 0)
+                (int) ($user['id'] ?? 0),
+                'production log'
             );
         }
 
@@ -1397,3 +1499,12 @@ try {
 
     redirect('dashboard.php');
 }
+
+            $salesRecipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($data['beverage_name'] ?? ''));
+            $selectedSalesIngredientIds = $buildRecipeIngredientIds($salesRecipeItems);
+            if ($selectedSalesIngredientIds === []) {
+                throw new RuntimeException('No active recipe configured for this beverage.');
+            }
+
+            $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
+            $data['inventory_item_id'] = $selectedSalesIngredientIds[0];

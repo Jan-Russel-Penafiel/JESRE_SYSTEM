@@ -3,7 +3,8 @@
     "allow": [
       "Bash(grep -n 'if \\($action ===' /c/xampp/htdocs/re/handlers.php)",
       "Read(//c/xampp/**)",
-      "Bash(./mysql/bin/mysql.exe -u root don_macchiatos -e \"SELECT id, item_name, stock_qty, unit, status FROM inventory_items ORDER BY item_name, id;\")"
+      "Bash(./mysql/bin/mysql.exe -u root don_macchiatos -e \"SELECT id, item_name, stock_qty, unit, status FROM inventory_items ORDER BY item_name, id;\")",
+      "Bash(php -l \"c:/xampp/htdocs/re/dashboard.php\")"
     ]
   }
 }

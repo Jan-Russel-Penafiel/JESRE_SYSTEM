@@ -14,6 +14,65 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
 
 Manager review remains available as an oversight layer for pending non-POS records, but the operational flow is department-driven.
 
+## Production Management (Revised Logic)
+
+1. Core Idea
+   - Shift from per-ingredient manual input -> per-flavor recipe system.
+   - Each product (flavor) has a fixed recipe.
+   - Sales will auto-deduct ingredients based on that recipe.
+2. Ingredient Setup (Stock Level)
+   - Example:
+     - Milk -> 1 liter
+     - Caramel Syrup -> 1 bottle
+     - Coffee Beans -> 1 pack
+     - Cups -> per piece
+     - Straws -> per piece
+3. Product Recipes (Per Flavor)
+   - Caramel Macchiato
+     - Milk -> 100 ml
+     - Caramel Syrup -> 100 ml
+     - Coffee Beans -> 1/8 portion
+     - Cup -> 1
+     - Straw -> 1
+   - Spanish Latte
+     - Milk -> 100 ml
+     - Caramel Syrup -> 100 ml
+     - Coffee Beans -> 1/8 portion
+     - Cup -> 1
+     - Straw -> 1
+4. Sales Process (Simplified)
+   - Staff selects:
+     - Flavor (e.g., Caramel Macchiato)
+     - Quantity
+   - System will:
+     - Auto-compute required ingredients
+     - Auto-deduct from inventory
+   - Example:
+     - Order: 10 Caramel Macchiato
+     - Deduction:
+       - Milk -> 100 ml x 10 = 1000 ml (1 liter)
+       - Caramel Syrup -> 100 ml x 10
+       - Coffee Beans -> 1/8 x 10
+       - Cups -> 10
+       - Straws -> 10
+5. Inventory Integration
+   - No manual deduction needed
+   - Stock updates in real-time after every sale
+   - Prevent sale if:
+     - Ingredients are insufficient
+6. Sales -> Accounting Automation
+   - Every transaction:
+     - Auto-record in Sales Table
+     - Auto-send data to Accounting Module
+   - Accounting will:
+     - Add to Revenue
+     - Update Income Statement automatically
+7. Benefits (System Behavior)
+   - Faster cashier workflow (select flavor only)
+   - Accurate ingredient tracking
+   - Real-time stock monitoring
+   - Automatic accounting records
+
 ## Departments and Tasks
 
 - Purchasing Department
@@ -25,10 +84,10 @@ Manager review remains available as an oversight layer for pending non-POS recor
   - Automatic updates
 - Production Department
   - Prepare beverages
-  - Input usage with multi-ingredient selection (with select-all support)
+  - Select beverage recipe and quantity (ingredients auto-deduct)
 - Sales Department
   - Process customer orders directly in POS
-  - Select multiple ingredient items for each order
+  - Select beverage recipe (flavor) and quantity
   - Set per-cup and per-straw consumption values
   - Process POS payment method (cash/card/digital)
   - Generate digital order code and receipt number
@@ -59,8 +118,8 @@ Manager review remains available as an oversight layer for pending non-POS recor
 ## Automation Rules
 
 On Sales processing (real-time POS mode is now enabled by default):
-- Inventory is automatically deducted for all selected ingredient items (`quantity * stock_deduct_qty`).
-- Additional utility stock deduction is applied for Cup and Straw using `quantity * per_cup_qty` and `quantity * per_straw_qty`.
+- Inventory is automatically deducted for all recipe ingredients (`quantity * recipe_required_qty`).
+- Utility stock (Cup/Straw) is deducted as part of recipe ingredients.
 - Accounting income record is auto-created.
 - CRM profile is auto-created/updated.
 - CRM purchase history is auto-recorded.
@@ -68,7 +127,7 @@ On Sales processing (real-time POS mode is now enabled by default):
 - Low stock auto-generates/updates a `Purchasing Department` request.
 
 On Sales create/edit (POS validation):
-- Flavor availability is checked against linked inventory stock.
+- Flavor availability is checked against recipe ingredient stock.
 - If insufficient stock, submission is blocked, Inventory is alerted, and a low-stock purchasing request is auto-created.
 - Payment is marked paid and receipt number is auto-issued.
 
@@ -83,7 +142,7 @@ On Purchasing approval:
 - Linked inventory item stock is automatically increased by `requested_qty`.
 
 On Production approval:
-- Inventory is automatically deducted (`ingredient_used_qty`).
+- Inventory is automatically deducted based on recipe ingredient quantities.
 
 Inventory monitoring:
 - `Central Dashboard` Live Stock Monitor refreshes every 15 seconds via `inventory_live.php` for users with inventory access.

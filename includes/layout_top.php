@@ -243,12 +243,35 @@ $fontCssVersion = is_file($fontCssFile) ? (string) filemtime($fontCssFile) : '1'
             syncIngredientSelectAllState(groupId);
         }
 
+        function initializeRecipeTooltips() {
+            document.querySelectorAll('select[data-recipe-tooltip]').forEach(function (select) {
+                if (select.dataset.recipeTooltipInitialized === '1') {
+                    return;
+                }
+
+                select.dataset.recipeTooltipInitialized = '1';
+
+                var syncTitle = function () {
+                    var option = select.options[select.selectedIndex];
+                    var tooltip = '';
+                    if (option) {
+                        tooltip = option.getAttribute('data-ingredients') || option.title || '';
+                    }
+                    select.title = tooltip;
+                };
+
+                select.addEventListener('change', syncTitle);
+                syncTitle();
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('table.stack-table').forEach(function (table) {
                 applyStackTableLabels(table);
             });
 
             initializeIngredientSelectionControls();
+            initializeRecipeTooltips();
         });
 
         window.addEventListener('keydown', function (event) {
