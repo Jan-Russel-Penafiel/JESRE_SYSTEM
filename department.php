@@ -61,28 +61,23 @@ if ($rangeFilter === 'daily') {
 }
 
 $isInventoryDepartment = $department === 'inventory';
+$isProductionDepartment = $department === 'production';
+$isPurchasingDepartment = $department === 'purchasing';
 $isAccountingDepartment = $department === 'accounting';
 $isCrmDepartment = $department === 'crm';
-$showCreateModal = !$isInventoryDepartment && !$isAccountingDepartment && !$isCrmDepartment;
-$showApplyResetButtons = !$isAccountingDepartment && !$isCrmDepartment;
+$showCreateModal = !$isInventoryDepartment && !$isProductionDepartment && !$isPurchasingDepartment && !$isCrmDepartment;
+$showApplyResetButtons = !$isCrmDepartment;
 $autoSubmitFilters = $isCrmDepartment;
-
-if ($isAccountingDepartment) {
-    $table = 'sales_orders';
-}
 
 $where = [];
 $params = [];
 
-if ($isAccountingDepartment) {
-    $where[] = "t.status = 'approved'";
-    $where[] = 'DATE(t.approved_at) = CURDATE()';
-} elseif ($statusFilter !== 'all') {
+if ($statusFilter !== 'all') {
     $where[] = 't.status = ?';
     $params[] = $statusFilter;
 }
 
-if ($search !== '' && !$isAccountingDepartment) {
+if ($search !== '') {
     $searchColumns = array_values(array_unique(array_map(static function (array $field): string {
         return $field['name'];
     }, $config['fields'])));
@@ -104,12 +99,12 @@ if ($search !== '' && !$isAccountingDepartment) {
     $where[] = '(' . implode(' OR ', $searchConditions) . ')';
 }
 
-if (!$isAccountingDepartment && $dateFrom !== '') {
+if ($dateFrom !== '') {
     $where[] = 'DATE(t.created_at) >= ?';
     $params[] = $dateFrom;
 }
 
-if (!$isAccountingDepartment && $dateTo !== '') {
+if ($dateTo !== '') {
     $where[] = 'DATE(t.created_at) <= ?';
     $params[] = $dateTo;
 }
@@ -151,7 +146,7 @@ $createButtonLabel = (string) ($config['create_button_label'] ?? 'Create Record'
 $submitLabel = (string) ($config['submit_label'] ?? 'Save Record');
 $editLabel = (string) ($config['edit_label'] ?? 'Save Changes');
 
-if (in_array($department, ['purchasing', 'production', 'sales'], true)) {
+if (in_array($department, ['purchasing', 'inventory', 'production', 'sales'], true)) {
     $allInventoryItems = $pdo->query('SELECT id, item_name, stock_qty, unit, per_cup_qty, per_straw_qty, status FROM inventory_items ORDER BY item_name ASC')->fetchAll();
     foreach ($allInventoryItems as $item) {
         $itemId = (int) ($item['id'] ?? 0);
@@ -264,7 +259,7 @@ if ($department === 'sales') {
 }
 
 $todayProductionStock = [];
-if ($department === 'production') {
+if ($department === 'sales') {
     $stockStmt = $pdo->query(
         "SELECT
             pl.beverage_name,
@@ -285,6 +280,77 @@ if ($department === 'production') {
     $todayProductionStock = $stockStmt ? $stockStmt->fetchAll() : [];
 }
 
+$dailySalesRows = [];
+$dailySalesTotal = 0.0;
+if ($isAccountingDepartment) {
+    $dailySalesStmt = $pdo->query("SELECT customer_name, beverage_name, quantity, unit_price, total_amount
+        FROM sales_orders
+        WHERE status = 'approved' AND DATE(created_at) = CURDATE()
+        ORDER BY COALESCE(paid_at, created_at) DESC, id DESC");
+    $dailySalesRows = $dailySalesStmt ? $dailySalesStmt->fetchAll() : [];
+    foreach ($dailySalesRows as $dailySalesRow) {
+        $dailySalesTotal += (float) ($dailySalesRow['total_amount'] ?? 0);
+    }
+}
+
+$productionSalesOrderRows = [];
+if ($isProductionDepartment) {
+    $salesCopyWhere = ["status = 'approved'"];
+    $salesCopyParams = [];
+
+    if ($dateFrom !== '') {
+        $salesCopyWhere[] = 'DATE(created_at) >= ?';
+        $salesCopyParams[] = $dateFrom;
+    }
+
+    if ($dateTo !== '') {
+        $salesCopyWhere[] = 'DATE(created_at) <= ?';
+        $salesCopyParams[] = $dateTo;
+    }
+
+    $salesCopyWhereSql = implode(' AND ', $salesCopyWhere);
+    $salesCopyStmt = $pdo->prepare("SELECT order_code, customer_name, beverage_name, quantity, total_amount, paid_at, created_at
+        FROM sales_orders
+        WHERE {$salesCopyWhereSql}
+        ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+        LIMIT 20");
+    $salesCopyStmt->execute($salesCopyParams);
+    $productionSalesOrderRows = $salesCopyStmt->fetchAll() ?: [];
+}
+
+$workflowInventoryRows = [];
+if (in_array($department, ['production', 'inventory'], true)) {
+    $workflowInventoryRows = $pdo->query("SELECT id, item_name, stock_qty, unit, reorder_level,
+            CASE
+                WHEN stock_qty <= 0 THEN 'out'
+                WHEN stock_qty <= reorder_level THEN 'low'
+                WHEN stock_qty >= (reorder_level * 3) AND reorder_level > 0 THEN 'high'
+                ELSE 'normal'
+            END AS stock_level
+        FROM inventory_items
+        WHERE status = 'approved'
+        ORDER BY
+            CASE
+                WHEN stock_qty <= 0 THEN 0
+                WHEN stock_qty <= reorder_level THEN 1
+                WHEN stock_qty >= (reorder_level * 3) AND reorder_level > 0 THEN 3
+                ELSE 2
+            END,
+            stock_qty ASC,
+            item_name ASC
+        LIMIT 20")->fetchAll() ?: [];
+}
+
+$inventoryPurchaseOrderRows = [];
+if ($isInventoryDepartment) {
+    $inventoryPurchaseOrderRows = $pdo->query("SELECT pr.*, i.item_name, i.unit, i.stock_qty, i.reorder_level
+        FROM purchase_requests pr
+        LEFT JOIN inventory_items i ON i.id = pr.inventory_item_id
+        WHERE pr.status = 'pending'
+        ORDER BY pr.updated_at DESC, pr.id DESC
+        LIMIT 20")->fetchAll() ?: [];
+}
+
 $pageTitle = $config['title'];
 $activePage = 'department_' . $department;
 require_once __DIR__ . '/includes/layout_top.php';
@@ -297,10 +363,9 @@ require_once __DIR__ . '/includes/layout_top.php';
 
         <div class="md:col-span-2 xl:col-span-2">
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Search</label>
-            <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search records" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" <?= $isAccountingDepartment ? 'disabled' : '' ?>>
+            <input type="text" name="q" value="<?= e($search) ?>" placeholder="Search records" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
         </div>
 
-        <?php if (!$isAccountingDepartment): ?>
         <div>
             <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Status</label>
             <select name="status" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
@@ -328,8 +393,6 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <?php endforeach; ?>
             </select>
         </div>
-        <?php endif; ?>
-
         <div class="md:col-span-2 xl:col-span-6 flex flex-wrap items-center gap-2">
             <div class="flex flex-wrap items-center gap-2">
                 <?php foreach (['daily' => 'Daily', 'weekly' => 'Weekly', 'monthly' => 'Monthly'] as $rangeKey => $rangeLabel): ?>
@@ -340,8 +403,15 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <?php if ($showApplyResetButtons): ?>
                     <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Apply Filters</button>
                     <a href="department.php?dept=<?= e($department) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</a>
+                    <?php if ($department === 'sales'): ?>
+                        <button type="button" onclick="openModal('modal-production-stock')" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Today's Production Stock</button>
+                        <button type="button" onclick="openModal('modal-sales-production-log')" class="rounded-xl border border-brand-300 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-100">Log Daily Production</button>
+                    <?php endif; ?>
                     <?php if ($department === 'production'): ?>
-                        <button type="button" onclick="openModal('modal-production-stock')" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Today's Stock</button>
+                        <button type="button" onclick="openModal('modal-production-purchase-request')" class="rounded-xl border border-orange-300 bg-orange-50 px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100">Prepare Purchase Request</button>
+                    <?php endif; ?>
+                    <?php if ($department === 'inventory'): ?>
+                        <button type="button" onclick="openModal('modal-inventory-purchase-order')" class="rounded-xl border border-brand-300 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-100">Prepare Purchase Order</button>
                     <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($showCreateModal): ?>
@@ -352,7 +422,6 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
     </form>
 
-    <?php if (!$isAccountingDepartment): ?>
     <div class="table-scroll mt-4">
         <table class="stack-table w-full min-w-[980px] text-sm">
             <thead>
@@ -376,6 +445,9 @@ require_once __DIR__ . '/includes/layout_top.php';
                         && !($department === 'sales' && ($row['status'] ?? '') === 'approved')
                         && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
                             || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
+                    $canPurchasingDecide = $department === 'purchasing'
+                        && ($row['status'] ?? '') === 'pending'
+                        && can_user_access_department($user ?? [], 'purchasing');
                     $isApproved = ($row['status'] ?? '') === 'approved';
                     $receiptPayload = null;
                     if ($department === 'sales') {
@@ -422,6 +494,10 @@ require_once __DIR__ . '/includes/layout_top.php';
                                     <button type="button" onclick="openModal('edit-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100">Edit</button>
                                     <button type="button" onclick="openModal('delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100">Delete</button>
                                 <?php endif; ?>
+                                <?php if ($canPurchasingDecide): ?>
+                                    <button type="button" onclick="openModal('approve-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100">Approve PO</button>
+                                    <button type="button" onclick="openModal('reject-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100">Reject PO</button>
+                                <?php endif; ?>
                             </div>
                         </td>
                     </tr>
@@ -434,15 +510,7 @@ require_once __DIR__ . '/includes/layout_top.php';
             </tbody>
         </table>
     </div>
-    <?php endif; ?>
-
     <?php if ($isAccountingDepartment): ?>
-        <?php
-        $dailySalesTotal = 0.0;
-        foreach ($rows as $dsRow) {
-            $dailySalesTotal += (float) ($dsRow['total_amount'] ?? 0);
-        }
-        ?>
         <div class="mt-6 grid gap-4 xl:grid-cols-2">
             <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <h4 class="text-sm font-extrabold text-blue-700">Daily Sales Transactions</h4>
@@ -459,8 +527,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                         </tr>
                         </thead>
                         <tbody class="text-slate-700">
-                        <?php if ($rows): ?>
-                            <?php foreach ($rows as $dsRow): ?>
+                        <?php if ($dailySalesRows): ?>
+                            <?php foreach ($dailySalesRows as $dsRow): ?>
                                 <tr class="border-t border-slate-100">
                                     <td class="py-2 pr-3"><?= e((string) ($dsRow['customer_name'] ?? '-')) ?></td>
                                     <td class="py-2 pr-3"><?= e((string) ($dsRow['beverage_name'] ?? '-')) ?></td>
@@ -510,7 +578,216 @@ require_once __DIR__ . '/includes/layout_top.php';
 
 </section>
 
-<?php if ($department === 'production'): ?>
+<?php if ($isProductionDepartment): ?>
+<section class="mt-6 grid gap-4 xl:grid-cols-2">
+    <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h4 class="text-sm font-extrabold text-slate-900">Sales Order Copies</h4>
+        <p class="mt-1 text-xs text-slate-500">Approved Sales Orders sent to Production for order preparation.</p>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[560px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-3" data-priority="high">Order</th>
+                    <th class="pb-2 pr-3" data-priority="high">Customer</th>
+                    <th class="pb-2 pr-3" data-priority="high">Beverage</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Qty</th>
+                    <th class="pb-2 text-right" data-priority="low">Paid</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($productionSalesOrderRows): ?>
+                    <?php foreach ($productionSalesOrderRows as $salesCopy): ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-3 font-semibold"><?= e((string) ($salesCopy['order_code'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3"><?= e((string) ($salesCopy['customer_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3"><?= e((string) ($salesCopy['beverage_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e((string) ((int) ($salesCopy['quantity'] ?? 0))) ?></td>
+                            <td class="py-2 text-right text-xs text-slate-500"><?= e(format_table_value('paid_at', $salesCopy['paid_at'] ?? ($salesCopy['created_at'] ?? null))) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="5" class="py-3 text-slate-500">No approved Sales Order copies in this view.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
+
+    <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h4 class="text-sm font-extrabold text-slate-900">Inventory Level Check</h4>
+        <p class="mt-1 text-xs text-slate-500">Low and high stock levels used before preparing purchase requests.</p>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[520px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-3" data-priority="high">Item</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="high">Stock</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Reorder</th>
+                    <th class="pb-2 text-right" data-priority="high">Level</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($workflowInventoryRows): ?>
+                    <?php foreach ($workflowInventoryRows as $inventoryLevel): ?>
+                        <?php
+                        $level = (string) ($inventoryLevel['stock_level'] ?? 'normal');
+                        $levelLabel = ['out' => 'Out', 'low' => 'Low', 'high' => 'High', 'normal' => 'Normal'][$level] ?? 'Normal';
+                        $levelClass = $level === 'out' ? 'text-rose-700' : ($level === 'low' ? 'text-orange-700' : ($level === 'high' ? 'text-brand-700' : 'text-emerald-700'));
+                        ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-3 font-semibold"><?= e((string) ($inventoryLevel['item_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($inventoryLevel['stock_qty'] ?? 0), 2)) ?> <?= e((string) ($inventoryLevel['unit'] ?? '')) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($inventoryLevel['reorder_level'] ?? 0), 2)) ?></td>
+                            <td class="py-2 text-right font-bold <?= e($levelClass) ?>"><?= e($levelLabel) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="4" class="py-3 text-slate-500">No approved inventory items available.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>
+
+<?php foreach ($inventoryPurchaseOrderRows as $purchaseOrderRow): ?>
+    <?php $purchaseOrderRowId = (int) ($purchaseOrderRow['id'] ?? 0); ?>
+    <div id="prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')">
+        <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+            <div class="flex items-start justify-between gap-3">
+                <h4 class="text-lg font-extrabold text-slate-900">Prepare Purchase Order #<?= e((string) $purchaseOrderRowId) ?></h4>
+                <button type="button" onclick="closeModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
+            </div>
+
+            <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+                <?= csrf_input() ?>
+                <input type="hidden" name="action" value="inventory_prepare_purchase_order">
+                <input type="hidden" name="dept" value="purchasing">
+                <input type="hidden" name="redirect_dept" value="inventory">
+                <input type="hidden" name="id" value="<?= e((string) $purchaseOrderRowId) ?>">
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Item to Purchase *</label>
+                    <select name="inventory_item_id" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
+                        <option value="">Select inventory item</option>
+                        <?php foreach ($approvedInventoryItems as $item): ?>
+                            <option value="<?= e((string) $item['id']) ?>" data-item-unit="<?= e((string) ($item['unit'] ?? '')) ?>" data-item-stock="<?= e((string) number_format((float) ($item['stock_qty'] ?? 0), 2)) ?>" <?= (int) ($purchaseOrderRow['inventory_item_id'] ?? 0) === (int) $item['id'] ? 'selected' : '' ?>><?= e($formatInventoryItemLabel($item, false)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Order Quantity *</label>
+                    <input type="number" name="requested_qty" step="0.01" min="0.01" value="<?= e((string) ($purchaseOrderRow['requested_qty'] ?? '')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
+                    <p class="mt-1 text-xs font-semibold text-slate-500" data-purchase-unit-display>Unit Type: Select ingredient first</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Supplier Name</label>
+                    <input type="text" name="supplier_name" value="<?= e((string) ($purchaseOrderRow['supplier_name'] ?? '')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Total Cost</label>
+                    <input type="number" name="quoted_unit_cost" step="0.01" min="0" value="<?= e((string) ($purchaseOrderRow['quoted_unit_cost'] ?? '')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Expected Delivery Date</label>
+                    <input type="date" name="expected_delivery_date" value="<?= e((string) ($purchaseOrderRow['expected_delivery_date'] ?? '')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+                </div>
+
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-semibold text-slate-700">Notes</label>
+                    <textarea name="notes" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"><?= e((string) ($purchaseOrderRow['notes'] ?? '')) ?></textarea>
+                </div>
+
+                <div class="md:col-span-2 flex justify-end">
+                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Save Purchase Order</button>
+                </div>
+            </form>
+        </div>
+    </div>
+<?php endforeach; ?>
+<?php endif; ?>
+
+<?php if ($isInventoryDepartment): ?>
+<section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <h4 class="text-sm font-extrabold text-slate-900">Low and High Stock Levels</h4>
+    <p class="mt-1 text-xs text-slate-500">Inventory prepares purchase orders for Purchasing approval from this stock review.</p>
+    <div class="table-scroll mt-3">
+        <table class="stack-table w-full min-w-[620px] text-sm">
+            <thead>
+            <tr class="text-left text-slate-500">
+                <th class="pb-2 pr-3" data-priority="high">Item</th>
+                <th class="pb-2 pr-3 text-right" data-priority="high">Stock</th>
+                <th class="pb-2 pr-3 text-right" data-priority="medium">Reorder</th>
+                <th class="pb-2 text-right" data-priority="high">Level</th>
+            </tr>
+            </thead>
+            <tbody class="text-slate-700">
+            <?php if ($workflowInventoryRows): ?>
+                <?php foreach ($workflowInventoryRows as $inventoryLevel): ?>
+                    <?php
+                    $level = (string) ($inventoryLevel['stock_level'] ?? 'normal');
+                    $levelLabel = ['out' => 'Out', 'low' => 'Low', 'high' => 'High', 'normal' => 'Normal'][$level] ?? 'Normal';
+                    $levelClass = $level === 'out' ? 'text-rose-700' : ($level === 'low' ? 'text-orange-700' : ($level === 'high' ? 'text-brand-700' : 'text-emerald-700'));
+                    ?>
+                    <tr class="border-t border-slate-100">
+                        <td class="py-2 pr-3 font-semibold"><?= e((string) ($inventoryLevel['item_name'] ?? '-')) ?></td>
+                        <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($inventoryLevel['stock_qty'] ?? 0), 2)) ?> <?= e((string) ($inventoryLevel['unit'] ?? '')) ?></td>
+                        <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($inventoryLevel['reorder_level'] ?? 0), 2)) ?></td>
+                        <td class="py-2 text-right font-bold <?= e($levelClass) ?>"><?= e($levelLabel) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <tr><td colspan="4" class="py-3 text-slate-500">No approved inventory items available.</td></tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-6">
+        <h4 class="text-sm font-extrabold text-slate-900">Production Purchase Requests</h4>
+        <p class="mt-1 text-xs text-slate-500">Inventory can complete supplier details before Purchasing approval.</p>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[760px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-3" data-priority="high">Code</th>
+                    <th class="pb-2 pr-3" data-priority="high">Item</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Qty</th>
+                    <th class="pb-2 pr-3" data-priority="medium">Supplier</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Cost</th>
+                    <th class="pb-2 text-right" data-priority="high">Action</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($inventoryPurchaseOrderRows): ?>
+                    <?php foreach ($inventoryPurchaseOrderRows as $purchaseOrderRow): ?>
+                        <?php $purchaseOrderRowId = (int) ($purchaseOrderRow['id'] ?? 0); ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-3 font-semibold"><?= e((string) ($purchaseOrderRow['request_code'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3"><?= e((string) ($purchaseOrderRow['item_name'] ?? ('Item #' . (int) ($purchaseOrderRow['inventory_item_id'] ?? 0)))) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($purchaseOrderRow['requested_qty'] ?? 0), 2)) ?> <?= e((string) ($purchaseOrderRow['unit'] ?? '')) ?></td>
+                            <td class="py-2 pr-3"><?= e((string) ($purchaseOrderRow['supplier_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($purchaseOrderRow['estimated_total'] ?? 0))) ?></td>
+                            <td class="py-2 text-right">
+                                <button type="button" onclick="openModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100">Prepare PO</button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="6" class="py-3 text-slate-500">No pending purchase requests for Inventory preparation.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+<?php endif; ?>
+
+<?php if ($department === 'sales'): ?>
 <div id="modal-production-stock" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'modal-production-stock')">
     <div class="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
         <div class="flex items-start justify-between gap-3">
@@ -554,6 +831,127 @@ require_once __DIR__ . '/includes/layout_top.php';
                 <p class="text-sm text-slate-500">No production logged for today yet.</p>
             <?php endif; ?>
         </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($department === 'sales'): ?>
+<div id="modal-sales-production-log" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'modal-sales-production-log')">
+    <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+        <div class="flex items-start justify-between gap-3">
+            <h4 class="text-lg font-extrabold text-slate-900">Log Daily Production</h4>
+            <button type="button" onclick="closeModal('modal-sales-production-log')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
+        </div>
+
+        <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+            <?= csrf_input() ?>
+            <input type="hidden" name="action" value="create_record">
+            <input type="hidden" name="dept" value="production">
+            <input type="hidden" name="redirect_dept" value="sales">
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Beverage Name *</label>
+                <?php if ($recipeOptions === []): ?>
+                    <div class="mt-1 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                        <p class="text-xs font-semibold text-rose-600">No active beverage recipes available.</p>
+                    </div>
+                <?php else: ?>
+                    <select name="beverage_name" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required data-recipe-tooltip>
+                        <option value="">Select beverage recipe</option>
+                        <?php foreach ($recipeOptions as $recipeOption): ?>
+                            <?php
+                            $recipeName = (string) ($recipeOption['beverage_name'] ?? '');
+                            $ingredientsTooltip = (string) ($recipeOption['ingredients_label'] ?? 'Ingredients: Not set');
+                            ?>
+                            <option value="<?= e($recipeName) ?>" title="<?= e($ingredientsTooltip) ?>" data-ingredients="<?= e($ingredientsTooltip) ?>"><?= e($recipeName) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php endif; ?>
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Quantity Prepared (cups) *</label>
+                <input type="number" name="quantity_prepared" step="1" min="1" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
+            </div>
+
+            <div class="md:col-span-2">
+                <label class="block text-sm font-semibold text-slate-700">Notes</label>
+                <textarea name="notes" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"></textarea>
+            </div>
+
+            <div class="md:col-span-2 flex justify-end">
+                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Save Production Log</button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($department === 'production' || $department === 'inventory'): ?>
+<?php
+$purchaseWorkflowModalId = $department === 'production' ? 'modal-production-purchase-request' : 'modal-inventory-purchase-order';
+$purchaseWorkflowTitle = $department === 'production' ? 'Prepare Purchase Request' : 'Prepare Purchase Order';
+$purchaseWorkflowSubmit = $department === 'production' ? 'Save Purchase Request' : 'Save Purchase Order';
+$purchaseWorkflowNote = $department === 'production'
+    ? 'Production sends this request when stock is low after order preparation.'
+    : 'Inventory prepares this purchase order for Purchasing approval.';
+?>
+<div id="<?= e($purchaseWorkflowModalId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, '<?= e($purchaseWorkflowModalId) ?>')">
+    <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+        <div class="flex items-start justify-between gap-3">
+            <div>
+                <h4 class="text-lg font-extrabold text-slate-900"><?= e($purchaseWorkflowTitle) ?></h4>
+                <p class="mt-0.5 text-xs text-slate-500"><?= e($purchaseWorkflowNote) ?></p>
+            </div>
+            <button type="button" onclick="closeModal('<?= e($purchaseWorkflowModalId) ?>')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
+        </div>
+
+        <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+            <?= csrf_input() ?>
+            <input type="hidden" name="action" value="create_record">
+            <input type="hidden" name="dept" value="purchasing">
+            <input type="hidden" name="redirect_dept" value="<?= e($department) ?>">
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Item to Purchase *</label>
+                <select name="inventory_item_id" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
+                    <option value="">Select inventory item</option>
+                    <?php foreach ($approvedInventoryItems as $item): ?>
+                        <option value="<?= e((string) $item['id']) ?>" data-item-unit="<?= e((string) ($item['unit'] ?? '')) ?>" data-item-stock="<?= e((string) number_format((float) ($item['stock_qty'] ?? 0), 2)) ?>"><?= e($formatInventoryItemLabel($item, false)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Order Quantity *</label>
+                <input type="number" name="requested_qty" step="0.01" min="0.01" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
+                <p class="mt-1 text-xs font-semibold text-slate-500" data-purchase-unit-display>Unit Type: Select ingredient first</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Supplier Name</label>
+                <input type="text" name="supplier_name" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Total Cost</label>
+                <input type="number" name="quoted_unit_cost" step="0.01" min="0" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700">Expected Delivery Date</label>
+                <input type="date" name="expected_delivery_date" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
+            </div>
+
+            <div class="md:col-span-2">
+                <label class="block text-sm font-semibold text-slate-700">Notes</label>
+                <textarea name="notes" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"></textarea>
+            </div>
+
+            <div class="md:col-span-2 flex justify-end">
+                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"><?= e($purchaseWorkflowSubmit) ?></button>
+            </div>
+        </form>
     </div>
 </div>
 <?php endif; ?>
@@ -708,6 +1106,9 @@ require_once __DIR__ . '/includes/layout_top.php';
         && !($department === 'sales' && ($row['status'] ?? '') === 'approved')
         && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
             || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
+    $canPurchasingDecide = $department === 'purchasing'
+        && ($row['status'] ?? '') === 'pending'
+        && can_user_access_department($user ?? [], 'purchasing');
     $isApproved = ($row['status'] ?? '') === 'approved';
     ?>
 
@@ -942,6 +1343,54 @@ require_once __DIR__ . '/includes/layout_top.php';
             </div>
         </div>
     <?php endif; ?>
+
+    <?php if ($canPurchasingDecide): ?>
+        <div id="approve-purchase-order-<?= e((string) $rowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'approve-purchase-order-<?= e((string) $rowId) ?>')">
+            <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+                <h4 class="text-lg font-extrabold text-slate-900">Approve Purchase Order #<?= e((string) $rowId) ?></h4>
+                <p class="mt-2 text-sm text-slate-600">Approval will restock the linked inventory item and create the purchase expense entry.</p>
+
+                <form method="post" action="handlers.php" class="mt-4 space-y-3">
+                    <?= csrf_input() ?>
+                    <input type="hidden" name="action" value="purchasing_decide_purchase_order">
+                    <input type="hidden" name="dept" value="purchasing">
+                    <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">
+                    <input type="hidden" name="decision" value="approved">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700">Approval Note (optional)</label>
+                        <textarea name="approval_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"></textarea>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" onclick="closeModal('approve-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500">Approve PO</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="reject-purchase-order-<?= e((string) $rowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'reject-purchase-order-<?= e((string) $rowId) ?>')">
+            <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+                <h4 class="text-lg font-extrabold text-slate-900">Reject Purchase Order #<?= e((string) $rowId) ?></h4>
+                <p class="mt-2 text-sm text-slate-600">Rejected purchase orders remain visible for correction and resubmission.</p>
+
+                <form method="post" action="handlers.php" class="mt-4 space-y-3">
+                    <?= csrf_input() ?>
+                    <input type="hidden" name="action" value="purchasing_decide_purchase_order">
+                    <input type="hidden" name="dept" value="purchasing">
+                    <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">
+                    <input type="hidden" name="decision" value="rejected">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700">Reason for Rejection</label>
+                        <textarea name="approval_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required></textarea>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" onclick="closeModal('reject-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+                        <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">Reject PO</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    <?php endif; ?>
 <?php endforeach; ?>
 
 <?php if ($department === 'sales'): ?>
@@ -1023,7 +1472,7 @@ require_once __DIR__ . '/includes/layout_top.php';
     </script>
 <?php endif; ?>
 
-<?php if ($department === 'purchasing'): ?>
+<?php if (in_array($department, ['purchasing', 'production', 'inventory'], true)): ?>
     <script>
         (function () {
             function syncPurchasingUnitType(form) {

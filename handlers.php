@@ -10,8 +10,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $action = $_POST['action'] ?? '';
 $department = $_POST['dept'] ?? '';
+$redirectDepartment = (string) ($_POST['redirect_dept'] ?? $department);
 $user = current_user();
 $pdo = db();
+
+if (!department_config($redirectDepartment)) {
+    $redirectDepartment = $department;
+}
 
 $redirectToDepartment = static function (string $dept): void {
     redirect('department.php?dept=' . urlencode($dept));
@@ -24,6 +29,24 @@ $requireConfig = static function (string $dept): array {
     }
 
     return $config;
+};
+
+$canCreateDepartmentRecord = static function (array $currentUser, string $dept): bool {
+    if (can_user_access_department($currentUser, $dept)) {
+        return true;
+    }
+
+    $userDepartment = (string) ($currentUser['department'] ?? '');
+
+    if ($dept === 'production' && $userDepartment === 'sales') {
+        return true;
+    }
+
+    if ($dept === 'purchasing' && in_array($userDepartment, ['production', 'inventory'], true)) {
+        return true;
+    }
+
+    return false;
 };
 
 $fetchRecord = static function (PDO $db, string $table, int $id, bool $forUpdate = false): ?array {
@@ -279,7 +302,7 @@ $ensureRecipeIngredientAvailability = static function (
             'Recipe ingredient ' . $itemName . ' does not exist.',
             'Recipe ingredient ' . $itemName . ' is not approved yet.',
             'Recipe ingredient quantity must be greater than zero.',
-            $itemName . ' is unavailable. Inventory Department has been alerted and Purchasing Department has been notified.',
+            $itemName . ' is unavailable. Inventory Department has been alerted for purchase order preparation.',
             'Inventory Department received a low-stock update from ' . $contextLabel . ' recipe consumption (' . $itemName . ').'
         );
     }
@@ -311,7 +334,7 @@ $ensureSalesFlavorAvailability = static function (
             'Selected flavor is unavailable because the linked ingredient record does not exist.',
             'Selected flavor is unavailable because the linked inventory ingredient is not approved yet.',
             'Quantity must be greater than zero.',
-            'Flavor unavailable for this order. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Flavor unavailable for this order. Inventory Department has been alerted for purchase order preparation.',
             'Inventory Department received a low-stock update from Sales while the flavor was still available.'
         );
     }
@@ -332,7 +355,7 @@ $ensureSalesFlavorAvailability = static function (
             'Flavor unavailable for this order. Cup inventory item does not exist.',
             'Flavor unavailable for this order. Cup inventory item is not approved yet.',
             'Quantity must be greater than zero.',
-            'Flavor unavailable for this order. Cup stock is insufficient. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Flavor unavailable for this order. Cup stock is insufficient. Inventory Department has been alerted for purchase order preparation.',
             'Inventory Department received a low-stock update from Sales cup consumption while stock was still available.'
         );
     }
@@ -353,7 +376,7 @@ $ensureSalesFlavorAvailability = static function (
             'Flavor unavailable for this order. Straw inventory item does not exist.',
             'Flavor unavailable for this order. Straw inventory item is not approved yet.',
             'Quantity must be greater than zero.',
-            'Flavor unavailable for this order. Straw stock is insufficient. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Flavor unavailable for this order. Straw stock is insufficient. Inventory Department has been alerted for purchase order preparation.',
             'Inventory Department received a low-stock update from Sales straw consumption while stock was still available.'
         );
     }
@@ -380,7 +403,7 @@ $ensureProductionIngredientAvailability = static function (
             'Selected production ingredient request cannot be completed because the linked inventory record does not exist.',
             'Selected production ingredient request cannot be completed because the inventory ingredient is not approved yet.',
             'Quantity prepared must be greater than zero.',
-            'Ingredient request cannot be fulfilled. Inventory Department has been alerted and Purchasing Department has been notified.',
+            'Ingredient request cannot be fulfilled. Inventory Department has been alerted for purchase order preparation.',
             'Inventory Department received a production ingredient request while the stock was already at/below reorder level.'
         );
     }
@@ -886,7 +909,7 @@ try {
     if ($action === 'create_record') {
         $config = $requireConfig($department);
 
-        if (!can_user_access_department($user ?? [], $department)) {
+        if (!$canCreateDepartmentRecord($user ?? [], $department)) {
             throw new RuntimeException('Unauthorized department access.');
         }
 
@@ -931,6 +954,14 @@ try {
             $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
             $data['request_code'] = ($data['request_code'] ?? null) ?: next_purchase_request_code($pdo);
             $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : round((float) $data['quoted_unit_cost'] * $data['requested_qty'], 2);
+            $sourceDepartment = (string) ($user['department'] ?? '');
+            if (in_array($sourceDepartment, ['production', 'inventory'], true)) {
+                $sourceNote = $sourceDepartment === 'production'
+                    ? '[Production Purchase Request]'
+                    : '[Inventory Purchase Order]';
+                $existingNote = trim((string) ($data['notes'] ?? ''));
+                $data['notes'] = trim($sourceNote . ($existingNote !== '' ? ' ' . $existingNote : ''));
+            }
         }
 
         if ($department === 'sales') {
@@ -1068,7 +1099,7 @@ try {
                 ? (department_label($department) . ' record saved and locked.')
                 : (department_label($department) . ' record created and queued for manager review.')
         );
-        $redirectToDepartment($department);
+        $redirectToDepartment($redirectDepartment);
     }
 
     if ($action === 'edit_record') {
@@ -1269,7 +1300,7 @@ try {
                 ? 'Record updated and processed in real-time.'
                 : 'Record updated and re-queued for manager review.'
         );
-        $redirectToDepartment($department);
+        $redirectToDepartment($redirectDepartment);
     }
 
     if ($action === 'delete_record') {
@@ -1322,6 +1353,152 @@ try {
 
         set_flash('success', 'Record deleted successfully.');
         $redirectToDepartment($department);
+    }
+
+    if ($action === 'inventory_prepare_purchase_order') {
+        if (!can_user_access_department($user ?? [], 'inventory')) {
+            throw new RuntimeException('Unauthorized department access.');
+        }
+
+        $config = $requireConfig('purchasing');
+        [$data, $errors] = validate_department_input($config, $_POST);
+        if ($errors) {
+            throw new RuntimeException(implode(' ', $errors));
+        }
+
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            throw new RuntimeException('Invalid purchase order ID.');
+        }
+
+        $data['requested_qty'] = (float) ($data['requested_qty'] ?? 0);
+        $quotedUnitCost = $data['quoted_unit_cost'] ?? null;
+        $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
+        $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : round((float) $data['quoted_unit_cost'] * $data['requested_qty'], 2);
+        $existingNote = trim((string) ($data['notes'] ?? ''));
+        if (strpos($existingNote, '[Inventory Purchase Order]') === false) {
+            $data['notes'] = trim('[Inventory Purchase Order]' . ($existingNote !== '' ? ' ' . $existingNote : ''));
+        }
+
+        $pdo->beginTransaction();
+
+        $table = $config['table'];
+        $record = $fetchRecord($pdo, $table, $id, true);
+        if (!$record) {
+            throw new RuntimeException('Purchase order not found.');
+        }
+
+        if (($record['status'] ?? '') !== 'pending') {
+            throw new RuntimeException('Only pending purchase requests can be prepared as purchase orders.');
+        }
+
+        $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
+        $inventoryLinkStmt->execute([(int) ($data['inventory_item_id'] ?? 0)]);
+        if (!$inventoryLinkStmt->fetch()) {
+            throw new RuntimeException('Selected inventory item for purchase order does not exist.');
+        }
+
+        $update = $pdo->prepare("UPDATE {$table}
+            SET inventory_item_id = ?,
+                requested_qty = ?,
+                supplier_name = ?,
+                quoted_unit_cost = ?,
+                estimated_total = ?,
+                expected_delivery_date = ?,
+                notes = ?,
+                submitted_by = ?,
+                updated_at = NOW()
+            WHERE id = ?");
+        $update->execute([
+            (int) ($data['inventory_item_id'] ?? 0),
+            (float) ($data['requested_qty'] ?? 0),
+            $data['supplier_name'] ?? null,
+            $data['quoted_unit_cost'],
+            (float) ($data['estimated_total'] ?? 0),
+            $data['expected_delivery_date'] ?? null,
+            $data['notes'] ?? null,
+            (int) ($user['id'] ?? 0),
+            $id,
+        ]);
+
+        $updatedRecord = $fetchRecord($pdo, $table, $id, false);
+        write_audit_log(
+            $pdo,
+            'inventory',
+            $table,
+            $id,
+            'prepare_purchase_order',
+            $record,
+            $updatedRecord,
+            (int) ($user['id'] ?? 0),
+            'Inventory Department prepared purchase order #' . $id . ' for Purchasing approval.',
+            'user'
+        );
+
+        $pdo->commit();
+
+        set_flash('success', 'Purchase order #' . $id . ' prepared for Purchasing approval.');
+        $redirectToDepartment('inventory');
+    }
+
+    if ($action === 'purchasing_decide_purchase_order') {
+        if (!can_user_access_department($user ?? [], 'purchasing')) {
+            throw new RuntimeException('Unauthorized department access.');
+        }
+
+        $config = $requireConfig('purchasing');
+        $table = $config['table'];
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            throw new RuntimeException('Invalid purchase order ID.');
+        }
+
+        $decision = (string) ($_POST['decision'] ?? '');
+        if (!in_array($decision, ['approved', 'rejected'], true)) {
+            throw new RuntimeException('Invalid purchase order decision.');
+        }
+
+        $approvalNote = trim((string) ($_POST['approval_note'] ?? ''));
+
+        $pdo->beginTransaction();
+
+        $record = $fetchRecord($pdo, $table, $id, true);
+        if (!$record) {
+            throw new RuntimeException('Purchase order not found.');
+        }
+
+        if (($record['status'] ?? '') !== 'pending') {
+            throw new RuntimeException('Only pending purchase orders can be processed.');
+        }
+
+        if ($decision === 'approved') {
+            $applyApprovalAutomation($pdo, 'purchasing', $record, (int) ($user['id'] ?? 0));
+        }
+
+        $update = $pdo->prepare("UPDATE {$table} SET status = ?, approved_by = ?, approval_note = ?, approved_at = NOW(), updated_at = NOW() WHERE id = ?");
+        $update->execute([$decision, (int) ($user['id'] ?? 0), $approvalNote !== '' ? $approvalNote : null, $id]);
+
+        $updatedRecord = $fetchRecord($pdo, $table, $id, false);
+        write_audit_log(
+            $pdo,
+            'purchasing',
+            $table,
+            $id,
+            $decision,
+            $record,
+            $updatedRecord,
+            (int) ($user['id'] ?? 0),
+            $approvalNote !== '' ? $approvalNote : ('Purchase order ' . $decision . ' by Purchasing Department.'),
+            'user'
+        );
+
+        $log = $pdo->prepare('INSERT INTO approval_logs (module, record_id, action, note, action_by) VALUES (?, ?, ?, ?, ?)');
+        $log->execute(['purchasing', $id, $decision, $approvalNote !== '' ? $approvalNote : null, (int) ($user['id'] ?? 0)]);
+
+        $pdo->commit();
+
+        set_flash('success', 'Purchase order #' . $id . ' has been ' . $decision . '.');
+        $redirectToDepartment('purchasing');
     }
 
     if ($action === 'approve_record' || $action === 'reject_record') {
@@ -1417,8 +1594,25 @@ try {
             }
 
             $requiredQty = (float) ($_POST['quantity_prepared'] ?? 0);
+            $requiredQtyByItemId = [];
+            if ($inventoryItemIds === [] && $requiredQty > 0) {
+                $recipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($_POST['beverage_name'] ?? ''));
+                foreach ($recipeItems as $recipeItem) {
+                    $recipeInventoryItemId = (int) ($recipeItem['inventory_item_id'] ?? 0);
+                    $recipeRequiredQty = (float) ($recipeItem['required_qty'] ?? 0) * $requiredQty;
+                    if ($recipeInventoryItemId <= 0 || $recipeRequiredQty <= 0) {
+                        continue;
+                    }
+
+                    $inventoryItemIds[$recipeInventoryItemId] = $recipeInventoryItemId;
+                    $requiredQtyByItemId[$recipeInventoryItemId] = $recipeRequiredQty;
+                }
+
+                $inventoryItemIds = array_values($inventoryItemIds);
+            }
+
             $purchaseReason = 'Inventory Department received a shortage alert from Production. Required %s but only %s available.';
-            $fallbackMessage = 'Ingredient request cannot be fulfilled. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Purchasing Department manually.';
+            $fallbackMessage = 'Ingredient request cannot be fulfilled. Inventory Department was alerted, but the purchase request could not be created automatically. Please notify Inventory Department manually.';
             $missingInventoryMessage = 'Ingredient request cannot be fulfilled. Unable to locate linked inventory ingredient items for auto-escalation.';
 
             if ($inventoryItemIds !== [] && $requiredQty > 0) {
@@ -1436,16 +1630,17 @@ try {
                         }
 
                         $availableQty = (float) ($inventoryRow['stock_qty'] ?? 0);
-                        if ($availableQty >= $requiredQty) {
+                        $itemRequiredQty = (float) ($requiredQtyByItemId[$inventoryItemId] ?? $requiredQty);
+                        if ($availableQty >= $itemRequiredQty) {
                             continue;
                         }
 
-                        $shortageQty = max($requiredQty - $availableQty, 1);
+                        $shortageQty = max($itemRequiredQty - $availableQty, 1);
                         $purchaseRequestId = $upsertLowStockPurchaseRequest(
                             $pdo,
                             $inventoryItemId,
                             (int) ($user['id'] ?? 0),
-                            sprintf($purchaseReason, number_format($requiredQty, 2), number_format($availableQty, 2)),
+                            sprintf($purchaseReason, number_format($itemRequiredQty, 2), number_format($availableQty, 2)),
                             $shortageQty,
                             true
                         );
@@ -1480,17 +1675,8 @@ try {
     }
 
     if ($department !== '') {
-        $redirectToDepartment($department);
+        $redirectToDepartment($redirectDepartment);
     }
 
     redirect('dashboard.php');
 }
-
-            $salesRecipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($data['beverage_name'] ?? ''));
-            $selectedSalesIngredientIds = $buildRecipeIngredientIds($salesRecipeItems);
-            if ($selectedSalesIngredientIds === []) {
-                throw new RuntimeException('No active recipe configured for this beverage.');
-            }
-
-            $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
-            $data['inventory_item_id'] = $selectedSalesIngredientIds[0];

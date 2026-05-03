@@ -4,11 +4,11 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
 
 ## Core Workflow (Based on flowchart.jpg)
 
-1. Purchasing buys ingredients before inventory runs out.
-2. Inventory receives ingredients, stores them in the database, auto-deducts stock on sales, and raises low-stock updates.
-3. Production requests ingredients from Inventory and logs beverage preparation.
-4. Sales confirms customer orders in POS, checks flavor availability, processes payment, issues the receipt, and updates sales logs in real time.
-5. Accounting records financial transactions and stores digital logs.
+1. Sales records customer orders and logs daily production.
+2. Production receives Sales Order copies, prepares orders, records inventory movement, and prepares purchase requests for low stock.
+3. Inventory reviews low and high stock levels and prepares purchase orders.
+4. Purchasing approves purchase orders.
+5. Accounting records sales-fed financial activity and operating expenses such as utilities, electricity, and water bills.
 6. CRM tracks customer preferences and purchase history.
 7. Marketing analyzes trends and promotes low-sales coffee.
 
@@ -76,26 +76,30 @@ Manager review remains available as an oversight layer for pending non-POS recor
 ## Departments and Tasks
 
 - Purchasing Department
-  - Review low-stock updates from Inventory/Sales automation
-  - Create purchase requests for ingredients and supplies
+  - Review purchase orders prepared by Inventory
+  - Approve or reject purchase orders
   - On approval, auto-restock linked inventory items
 - Inventory Department
   - Real-time stock monitoring (live auto-refresh)
-  - Automatic updates
+  - Determine low and high stock levels
+  - Prepare purchase orders for Purchasing approval
 - Production Department
-  - Prepare beverages
-  - Select beverage recipe and quantity (ingredients auto-deduct)
+  - Receive Sales Order copies
+  - Prepare orders and review inventory movement
+  - Prepare purchase requests when stock is low
 - Sales Department
   - Process customer orders directly in POS
+  - Log daily production from the Sales Department
   - Select beverage recipe (flavor) and quantity
   - Set per-cup and per-straw consumption values
   - Process POS payment method (cash/card/digital)
   - Generate digital order code and receipt number
   - Automate sales recording in real time
-  - Inventory auto-deducted when the order is processed
+  - Production stock is checked when the order is processed
   - Print receipt from Sales actions using jsPDF
 - Accounting Department
-  - Record financial transactions
+  - Record expense transactions for utilities and bills
+  - Review sales-fed income records
   - Generate financial reports
 - CRM Department
   - Track customer preferences
@@ -118,17 +122,18 @@ Manager review remains available as an oversight layer for pending non-POS recor
 ## Automation Rules
 
 On Sales processing (real-time POS mode is now enabled by default):
-- Inventory is automatically deducted for all recipe ingredients (`quantity * recipe_required_qty`).
-- Utility stock (Cup/Straw) is deducted as part of recipe ingredients.
+- Sales checks today's logged production stock before accepting a customer order.
+- Inventory deduction happens when the daily production log is saved from Sales.
+- Utility stock (Cup/Straw) is deducted as part of production recipe ingredients.
 - Accounting income record is auto-created.
 - CRM profile is auto-created/updated.
 - CRM purchase history is auto-recorded.
 - Marketing campaign is auto-generated/updated (`AUTO-DIGITAL-YYYYMMDD`) using sales trend + inventory health.
-- Low stock auto-generates/updates a `Purchasing Department` request.
+- Low stock auto-generates/updates a purchasing document for the Inventory -> Purchasing flow.
 
 On Sales create/edit (POS validation):
-- Flavor availability is checked against recipe ingredient stock.
-- If insufficient stock, submission is blocked, Inventory is alerted, and a low-stock purchasing request is auto-created.
+- Production stock availability is checked before a Sales Order is processed.
+- If production stock is insufficient, submission is blocked until daily production is logged.
 - Payment is marked paid and receipt number is auto-issued.
 
 ## Security Hardening
@@ -140,9 +145,14 @@ On Sales create/edit (POS validation):
 
 On Purchasing approval:
 - Linked inventory item stock is automatically increased by `requested_qty`.
+- Accounting receives an approved purchase expense entry.
 
 On Production approval:
 - Inventory is automatically deducted based on recipe ingredient quantities.
+
+Simple operational flow:
+- Sales -> Production -> Inventory -> Purchasing
+- Sales -> Accounting for expenses and financial records
 
 Inventory monitoring:
 - `Central Dashboard` Live Stock Monitor refreshes every 15 seconds via `inventory_live.php` for users with inventory access.

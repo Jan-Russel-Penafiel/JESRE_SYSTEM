@@ -592,7 +592,7 @@ $gmDeptMeta = [
 <section id="dept-purchasing" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Purchasing Department Dashboard</h3>
-        <p class="text-sm text-slate-600">Statistical analytics of purchasing ingredients and inventory status.</p>
+        <p class="text-sm text-slate-600">Purchase order approvals, supplier quantities, and inventory status.</p>
         <?php if (!$isGeneralManager): ?>
             <?php $renderRangeFilters($range, $rangeLabelMap); ?>
         <?php endif; ?>
@@ -627,7 +627,7 @@ $gmDeptMeta = [
 
     <div class="grid gap-4 xl:grid-cols-2">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h4 class="text-sm font-extrabold text-slate-900">Purchase Request Status</h4>
+            <h4 class="text-sm font-extrabold text-slate-900">Purchase Order Status</h4>
             <div class="flex items-center justify-center mt-3" style="height:220px">
                 <canvas id="chartPurchasingStatus"></canvas>
             </div>
@@ -707,7 +707,7 @@ $gmDeptMeta = [
 <section id="dept-inventory" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Inventory Department Dashboard</h3>
-        <p class="text-sm text-slate-600">Inventory status and inventory monitoring.</p>
+        <p class="text-sm text-slate-600">Inventory status, low/high stock monitoring, and purchase order preparation.</p>
         <?php if (!$isGeneralManager): ?>
             <?php $renderRangeFilters($range, $rangeLabelMap); ?>
         <?php endif; ?>
@@ -809,7 +809,7 @@ $gmDeptMeta = [
 <section id="dept-production" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Production Department Dashboard</h3>
-        <p class="text-sm text-slate-600">Production logs, prepared quantity, and beverage output monitoring.</p>
+        <p class="text-sm text-slate-600">Sales Order copies, prepared quantity, and inventory movement monitoring.</p>
         <?php if (!$isGeneralManager): ?>
             <?php $renderRangeFilters($range, $rangeLabelMap); ?>
         <?php endif; ?>
@@ -887,7 +887,7 @@ $gmDeptMeta = [
     </article>
 
     <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h4 class="text-sm font-extrabold text-slate-900">Recent Production Logs</h4>
+        <h4 class="text-sm font-extrabold text-slate-900">Recent Daily Production Logs</h4>
         <div class="table-scroll mt-3">
             <table class="stack-table w-full min-w-[460px] text-sm">
                 <thead>
@@ -1075,6 +1075,7 @@ $gmDeptMeta = [
 <section id="dept-accounting" class="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <div>
         <h3 class="text-lg font-extrabold text-slate-900">Accounting Department Dashboard</h3>
+        <p class="text-sm text-slate-600">Sales-fed income and recorded operating expenses for utilities, bills, and purchases.</p>
         <p class="text-sm text-slate-600">Sales summary with tracked syrup flavor analytics (Caramel Syrup, Matcha coffee Syrup, Spanish latte Syrup, Hazelnuts Syrup, Vanilla Syrup).</p>
         <?php if (!$isGeneralManager): ?>
             <?php $renderRangeFilters($range, $rangeLabelMap); ?>
