@@ -44,6 +44,10 @@ foreach (department_configs() as $departmentKey => $departmentConfig) {
     $rows = $stmt->fetchAll();
 
     foreach ($rows as $row) {
+        if ($departmentKey === 'purchasing' && !can_general_manager_finalize_purchase_order($row)) {
+            continue;
+        }
+
         $row['primary_value'] = $row[$primaryLabel] ?? ('#' . $row['id']);
         $pendingRecords[] = $row;
     }
@@ -148,6 +152,17 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         <p class="text-xs uppercase tracking-wide text-slate-500">Total Amount</p>
                         <p class="font-semibold text-slate-800"><?= e(format_money((float) ($record['total_amount'] ?? 0))) ?></p>
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($departmentKey === 'purchasing'): ?>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Workflow Stage</p>
+                        <p class="font-semibold text-slate-800"><?= e(purchase_workflow_stage_label($record)) ?></p>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Purchasing Note</p>
+                        <p class="font-semibold text-slate-800"><?= e((string) ($record['purchasing_note'] ?? '-')) ?></p>
                     </div>
                 <?php endif; ?>
 

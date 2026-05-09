@@ -5,9 +5,9 @@ A procedural (non-OOP) PHP + MySQL + Tailwind CSS web system based on your flowc
 ## Core Workflow (Based on flowchart.jpg)
 
 1. Sales records customer orders and logs daily production.
-2. Production receives Sales Order copies, prepares orders, records inventory movement, and prepares purchase requests for low stock.
-3. Inventory reviews low and high stock levels and prepares purchase orders.
-4. Purchasing approves purchase orders.
+2. Production receives Sales Order copies, prepares orders, records inventory movement, and sends purchase requests for low stock directly to Inventory.
+3. Inventory receives purchase requests, confirms the generated purchase order, and sends it to Purchasing.
+4. Purchasing processes confirmed purchase orders, then routes them to the General Manager for final approval.
 5. Accounting records sales-fed financial activity and operating expenses such as utilities, electricity, and water bills.
 6. CRM tracks customer preferences and purchase history.
 7. Marketing analyzes trends and promotes low-sales coffee.
@@ -76,17 +76,17 @@ Manager review remains available as an oversight layer for pending non-POS recor
 ## Departments and Tasks
 
 - Purchasing Department
-  - Review purchase orders prepared by Inventory
-  - Approve or reject purchase orders
-  - On approval, auto-restock linked inventory items
+  - Review purchase orders confirmed by Inventory
+  - Process or reject purchase orders
+  - Processed purchase orders require General Manager final approval before restocking
 - Inventory Department
   - Real-time stock monitoring (live auto-refresh)
   - Determine low and high stock levels
-  - Prepare purchase orders for Purchasing approval
+  - Confirm generated purchase orders for Purchasing processing
 - Production Department
   - Receive Sales Order copies
   - Prepare orders and review inventory movement
-  - Prepare purchase requests when stock is low
+  - Send purchase requests to Inventory when stock is low
 - Sales Department
   - Process customer orders directly in POS
   - Log daily production from the Sales Department
@@ -143,15 +143,18 @@ On Sales create/edit (POS validation):
 - Select-type form fields are validated server-side against configured options.
 - Daily order/request/receipt numbering now uses an atomic sequence table to avoid code collisions under concurrent requests.
 
-On Purchasing approval:
-- Linked inventory item stock is automatically increased by `requested_qty`.
-- Accounting receives an approved purchase expense entry.
+On Purchase workflow:
+- Production purchase requests are created as pending Inventory review and do not require General Manager approval.
+- Inventory confirmation marks the request as a purchase order and sends it to Purchasing.
+- Purchasing processing sends the order to the General Manager review queue.
+- General Manager final approval increases the linked inventory stock by `requested_qty`.
+- Accounting receives an approved purchase expense entry only after General Manager final approval.
 
 On Production approval:
 - Inventory is automatically deducted based on recipe ingredient quantities.
 
 Simple operational flow:
-- Sales -> Production -> Inventory -> Purchasing
+- Sales -> Production -> Inventory -> Purchasing -> General Manager final purchase approval
 - Sales -> Accounting for expenses and financial records
 
 Inventory monitoring:
@@ -212,6 +215,9 @@ Inventory monitoring:
 4. If needed, edit DB credentials in `config.php`.
 5. Sales POS runs in real time by default. If needed, override with environment variable `REALTIME_SALES_MODE=0`.
 6. Open: `http://localhost/re`.
+
+Upgrade note:
+- Existing databases must run `scripts/2026_05_10_purchase_workflow.sql` once to add the Inventory confirmation and Purchasing processing columns used by the updated purchase workflow.
 
 If you are upgrading from an earlier version of this project, back up data first, then recreate the database from `schema.sql` so Purchasing and POS schema updates are fully applied.
 

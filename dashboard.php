@@ -157,7 +157,7 @@ if ($canAccessPurchasing) {
         COALESCE(SUM(requested_qty), 0) AS total_requested_qty,
         COALESCE(SUM(CASE WHEN status = 'approved' THEN estimated_total ELSE 0 END), 0) AS approved_estimated_total
     FROM purchase_requests
-    WHERE {$rangeWhere}")->fetch() ?: [];
+    WHERE {$rangeWhere} AND inventory_confirmed_at IS NOT NULL")->fetch() ?: [];
 
     $purchasingStats = [
         'total_requests' => (int) ($purchasingStatsRow['total_requests'] ?? 0),
@@ -175,7 +175,7 @@ if ($canAccessPurchasing) {
         COALESCE(SUM(CASE WHEN pr.status = 'approved' THEN pr.estimated_total ELSE 0 END), 0) AS approved_estimated_total
     FROM purchase_requests pr
     LEFT JOIN inventory_items i ON i.id = pr.inventory_item_id
-    WHERE {$purchasingRangeWhere}
+    WHERE {$purchasingRangeWhere} AND pr.inventory_confirmed_at IS NOT NULL
     GROUP BY pr.inventory_item_id, ingredient_name
     ORDER BY total_requested_qty DESC, approved_estimated_total DESC
     LIMIT 8")->fetchAll() ?: [];

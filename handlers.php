@@ -103,7 +103,7 @@ $upsertLowStockPurchaseRequest = static function (
     }
 
     $existingStmt = $db->prepare("SELECT * FROM purchase_requests
-        WHERE inventory_item_id = ? AND status = 'pending'
+        WHERE inventory_item_id = ? AND status = 'pending' AND inventory_confirmed_at IS NULL
         ORDER BY id DESC
         LIMIT 1 FOR UPDATE");
     $existingStmt->execute([$inventoryItemId]);
@@ -133,7 +133,7 @@ $upsertLowStockPurchaseRequest = static function (
                 $oldRequest,
                 $updatedRequest,
                 $actorId,
-                'Auto-updated purchase request after Inventory forwarded a low-stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
+                'Auto-updated purchase request for Inventory review after a low-stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
                 'system'
             );
         }
@@ -168,7 +168,7 @@ $upsertLowStockPurchaseRequest = static function (
         null,
         $purchaseRequest,
         $actorId,
-        'Auto-created purchase request after Inventory forwarded a low-stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
+        'Auto-created purchase request for Inventory review after a low-stock alert (' . ($inventory['item_name'] ?? 'Unknown Item') . ').',
         'system'
     );
 
@@ -961,6 +961,11 @@ try {
                     : '[Inventory Purchase Order]';
                 $existingNote = trim((string) ($data['notes'] ?? ''));
                 $data['notes'] = trim($sourceNote . ($existingNote !== '' ? ' ' . $existingNote : ''));
+
+                if ($sourceDepartment === 'inventory') {
+                    $data['inventory_confirmed_by'] = (int) ($user['id'] ?? 0);
+                    $data['inventory_confirmed_at'] = date('Y-m-d H:i:s');
+                }
             }
         }
 
@@ -1060,6 +1065,18 @@ try {
         $recordId = (int) $pdo->lastInsertId();
         $createdRecord = $fetchRecord($pdo, $table, $recordId, false);
 
+        $createAuditNote = $realTimeSales
+            ? 'Record created and processed in real-time POS mode.'
+            : 'Record created and queued for manager review.';
+        if ($department === 'purchasing') {
+            $sourceDepartment = (string) ($user['department'] ?? '');
+            if ($sourceDepartment === 'production') {
+                $createAuditNote = 'Production Department sent a purchase request to Inventory review.';
+            } elseif ($sourceDepartment === 'inventory') {
+                $createAuditNote = 'Inventory Department confirmed a purchase order and sent it to Purchasing.';
+            }
+        }
+
         write_audit_log(
             $pdo,
             $department,
@@ -1069,9 +1086,7 @@ try {
             null,
             $createdRecord,
             (int) ($user['id'] ?? 0),
-            $realTimeSales
-                ? 'Record created and processed in real-time POS mode.'
-                : 'Record created and queued for manager review.',
+            $createAuditNote,
             'user'
         );
 
@@ -1093,12 +1108,19 @@ try {
 
         $pdo->commit();
 
-        set_flash(
-            'success',
-            ($realTimeSales || $realTimeProduction)
-                ? (department_label($department) . ' record saved and locked.')
-                : (department_label($department) . ' record created and queued for manager review.')
-        );
+        $successMessage = ($realTimeSales || $realTimeProduction)
+            ? (department_label($department) . ' record saved and locked.')
+            : (department_label($department) . ' record created and queued for manager review.');
+        if ($department === 'purchasing') {
+            $sourceDepartment = (string) ($user['department'] ?? '');
+            if ($sourceDepartment === 'production') {
+                $successMessage = 'Purchase request sent to Inventory Department.';
+            } elseif ($sourceDepartment === 'inventory') {
+                $successMessage = 'Purchase order confirmed and sent to Purchasing Department.';
+            }
+        }
+
+        set_flash('success', $successMessage);
         $redirectToDepartment($redirectDepartment);
     }
 
@@ -1388,8 +1410,8 @@ try {
             throw new RuntimeException('Purchase order not found.');
         }
 
-        if (($record['status'] ?? '') !== 'pending') {
-            throw new RuntimeException('Only pending purchase requests can be prepared as purchase orders.');
+        if (!can_inventory_confirm_purchase_order($record)) {
+            throw new RuntimeException('Only pending purchase requests awaiting Inventory review can be confirmed as purchase orders.');
         }
 
         $inventoryLinkStmt = $pdo->prepare('SELECT id FROM inventory_items WHERE id = ? LIMIT 1 FOR UPDATE');
@@ -1406,6 +1428,14 @@ try {
                 estimated_total = ?,
                 expected_delivery_date = ?,
                 notes = ?,
+                inventory_confirmed_by = ?,
+                inventory_confirmed_at = NOW(),
+                purchasing_processed_by = NULL,
+                purchasing_processed_at = NULL,
+                purchasing_note = NULL,
+                approved_by = NULL,
+                approval_note = NULL,
+                approved_at = NULL,
                 submitted_by = ?,
                 updated_at = NOW()
             WHERE id = ?");
@@ -1418,6 +1448,7 @@ try {
             $data['expected_delivery_date'] ?? null,
             $data['notes'] ?? null,
             (int) ($user['id'] ?? 0),
+            (int) ($user['id'] ?? 0),
             $id,
         ]);
 
@@ -1427,17 +1458,17 @@ try {
             'inventory',
             $table,
             $id,
-            'prepare_purchase_order',
+            'confirm_purchase_order',
             $record,
             $updatedRecord,
             (int) ($user['id'] ?? 0),
-            'Inventory Department prepared purchase order #' . $id . ' for Purchasing approval.',
+            'Inventory Department confirmed purchase order #' . $id . ' for Purchasing processing.',
             'user'
         );
 
         $pdo->commit();
 
-        set_flash('success', 'Purchase order #' . $id . ' prepared for Purchasing approval.');
+        set_flash('success', 'Purchase order #' . $id . ' confirmed and sent to Purchasing.');
         $redirectToDepartment('inventory');
     }
 
@@ -1454,7 +1485,7 @@ try {
         }
 
         $decision = (string) ($_POST['decision'] ?? '');
-        if (!in_array($decision, ['approved', 'rejected'], true)) {
+        if (!in_array($decision, ['processed', 'rejected'], true)) {
             throw new RuntimeException('Invalid purchase order decision.');
         }
 
@@ -1467,37 +1498,61 @@ try {
             throw new RuntimeException('Purchase order not found.');
         }
 
-        if (($record['status'] ?? '') !== 'pending') {
-            throw new RuntimeException('Only pending purchase orders can be processed.');
+        if (!can_purchasing_process_purchase_order($record)) {
+            throw new RuntimeException('Only Inventory-confirmed purchase orders can be processed by Purchasing.');
         }
 
-        if ($decision === 'approved') {
-            $applyApprovalAutomation($pdo, 'purchasing', $record, (int) ($user['id'] ?? 0));
+        if ($decision === 'processed') {
+            $update = $pdo->prepare("UPDATE {$table}
+                SET purchasing_processed_by = ?,
+                    purchasing_processed_at = NOW(),
+                    purchasing_note = ?,
+                    updated_at = NOW()
+                WHERE id = ?");
+            $update->execute([(int) ($user['id'] ?? 0), $approvalNote !== '' ? $approvalNote : null, $id]);
+        } else {
+            $update = $pdo->prepare("UPDATE {$table}
+                SET status = 'rejected',
+                    approved_by = ?,
+                    approval_note = ?,
+                    approved_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = ?");
+            $update->execute([(int) ($user['id'] ?? 0), $approvalNote !== '' ? $approvalNote : null, $id]);
         }
-
-        $update = $pdo->prepare("UPDATE {$table} SET status = ?, approved_by = ?, approval_note = ?, approved_at = NOW(), updated_at = NOW() WHERE id = ?");
-        $update->execute([$decision, (int) ($user['id'] ?? 0), $approvalNote !== '' ? $approvalNote : null, $id]);
 
         $updatedRecord = $fetchRecord($pdo, $table, $id, false);
+        $auditAction = $decision === 'processed' ? 'process_purchase_order' : 'rejected';
         write_audit_log(
             $pdo,
             'purchasing',
             $table,
             $id,
-            $decision,
+            $auditAction,
             $record,
             $updatedRecord,
             (int) ($user['id'] ?? 0),
-            $approvalNote !== '' ? $approvalNote : ('Purchase order ' . $decision . ' by Purchasing Department.'),
+            $approvalNote !== ''
+                ? $approvalNote
+                : ($decision === 'processed'
+                    ? 'Purchase order processed by Purchasing Department and sent to General Manager for final approval.'
+                    : 'Purchase order rejected by Purchasing Department.'),
             'user'
         );
 
-        $log = $pdo->prepare('INSERT INTO approval_logs (module, record_id, action, note, action_by) VALUES (?, ?, ?, ?, ?)');
-        $log->execute(['purchasing', $id, $decision, $approvalNote !== '' ? $approvalNote : null, (int) ($user['id'] ?? 0)]);
+        if ($decision === 'rejected') {
+            $log = $pdo->prepare('INSERT INTO approval_logs (module, record_id, action, note, action_by) VALUES (?, ?, ?, ?, ?)');
+            $log->execute(['purchasing', $id, 'rejected', $approvalNote !== '' ? $approvalNote : null, (int) ($user['id'] ?? 0)]);
+        }
 
         $pdo->commit();
 
-        set_flash('success', 'Purchase order #' . $id . ' has been ' . $decision . '.');
+        set_flash(
+            'success',
+            $decision === 'processed'
+                ? 'Purchase order #' . $id . ' processed and sent to General Manager for final approval.'
+                : 'Purchase order #' . $id . ' has been rejected.'
+        );
         $redirectToDepartment('purchasing');
     }
 
@@ -1524,6 +1579,10 @@ try {
 
         if (($record['status'] ?? '') !== 'pending') {
             throw new RuntimeException('Only pending records can be processed.');
+        }
+
+        if ($department === 'purchasing' && !can_general_manager_finalize_purchase_order($record)) {
+            throw new RuntimeException('Purchase order must be confirmed by Inventory and processed by Purchasing before General Manager final approval.');
         }
 
         if ($decision === 'approved') {

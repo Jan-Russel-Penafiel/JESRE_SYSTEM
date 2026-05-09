@@ -40,14 +40,14 @@ $DEPARTMENT_CONFIG = [
     'purchasing' => [
         'table' => 'purchase_requests',
         'title' => 'Purchasing Department',
-        'description' => 'Approve purchase orders prepared by Inventory after Production sends low-stock purchase requests.',
+        'description' => 'Process purchase orders confirmed by Inventory, then route them to the General Manager for final purchase approval.',
         'create_button_label' => 'New Purchase Order',
         'submit_label' => 'Save Purchase Order',
         'edit_label' => 'Save Changes',
         'workflow_points' => [
-            'Receive purchase orders prepared by Inventory.',
-            'Approve supplier purchase orders for low-stock ingredients and supplies.',
-            'Approved purchase orders automatically restock linked inventory items.',
+            'Receive purchase orders confirmed by Inventory.',
+            'Process supplier purchase orders for low-stock ingredients and supplies.',
+            'General Manager final approval restocks linked inventory items and records the expense.',
         ],
         'primary_label' => 'request_code',
         'fields' => [
@@ -65,6 +65,7 @@ $DEPARTMENT_CONFIG = [
             'Order Qty' => 'requested_qty',
             'Supplier' => 'supplier_name',
             'Total Cost' => 'estimated_total',
+            'Workflow Stage' => 'purchase_workflow_stage',
             'Status' => 'status',
             'Updated' => 'updated_at',
         ],
@@ -72,14 +73,14 @@ $DEPARTMENT_CONFIG = [
     'inventory' => [
         'table' => 'inventory_items',
         'title' => 'Inventory Department',
-        'description' => 'Monitor low and high stock levels, then prepare purchase orders from Production low-stock requests.',
+        'description' => 'Monitor stock levels, receive Production purchase requests, and confirm generated purchase orders for Purchasing.',
         'create_button_label' => 'Prepare Purchase Order',
         'submit_label' => 'Save Inventory Entry',
         'edit_label' => 'Save Changes',
         'workflow_points' => [
             'Record and monitor inventory levels after Production prepares orders.',
             'Determine low and high stock levels from live inventory quantities.',
-            'Prepare purchase orders for Purchasing approval when stock is low.',
+            'Confirm generated purchase orders for Purchasing processing when stock is low.',
         ],
         'primary_label' => 'item_name',
         'fields' => [
@@ -105,14 +106,14 @@ $DEPARTMENT_CONFIG = [
     'production' => [
         'table' => 'production_logs',
         'title' => 'Production Department',
-        'description' => 'Receive a copy of Sales Orders, prepare the order, record inventory movement, and prepare low-stock purchase requests.',
+        'description' => 'Receive Sales Order copies, prepare orders, record inventory movement, and send low-stock purchase requests directly to Inventory.',
         'create_button_label' => 'Production Log',
         'submit_label' => 'Save Production Log',
         'edit_label' => 'Save Changes',
         'workflow_points' => [
             'Receive approved Sales Order copies from Sales.',
             'Prepare orders and monitor inventory movement after preparation.',
-            'Prepare purchase requests when stock reaches the low-stock threshold.',
+            'Send purchase requests to Inventory when stock reaches the low-stock threshold.',
         ],
         'primary_label' => 'beverage_name',
         'fields' => [
