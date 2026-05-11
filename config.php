@@ -40,13 +40,13 @@ $DEPARTMENT_CONFIG = [
     'purchasing' => [
         'table' => 'purchase_requests',
         'title' => 'Purchasing Department',
-        'description' => 'Process purchase orders confirmed by Inventory, then route them to the General Manager for final purchase approval.',
+        'description' => 'Make purchase orders confirmed by Inventory, then route them to the General Manager for final purchase approval.',
         'create_button_label' => 'New Purchase Order',
         'submit_label' => 'Save Purchase Order',
         'edit_label' => 'Save Changes',
         'workflow_points' => [
             'Receive purchase orders confirmed by Inventory.',
-            'Process supplier purchase orders for low-stock ingredients and supplies.',
+            'Make supplier purchase orders for low-stock ingredients and supplies.',
             'General Manager final approval restocks linked inventory items and records the expense.',
         ],
         'primary_label' => 'request_code',
@@ -80,7 +80,7 @@ $DEPARTMENT_CONFIG = [
         'workflow_points' => [
             'Record and monitor inventory levels after Production prepares orders.',
             'Determine low and high stock levels from live inventory quantities.',
-            'Confirm generated purchase orders for Purchasing processing when stock is low.',
+            'Confirm generated purchase orders for Purchasing when stock is low.',
         ],
         'primary_label' => 'item_name',
         'fields' => [
@@ -135,7 +135,7 @@ $DEPARTMENT_CONFIG = [
         'submit_label' => 'Save Sale',
         'edit_label' => 'Save Changes',
         'workflow_points' => [
-            'Log daily production at Sales before customer orders consume production stock.',
+            'Record buyer name, beverage, and quantity without blocking on same-day production stock.',
             'Record buyer name, beverage, and quantity for the Sales Order.',
             'Approved sales send order copies to Production and accounting entries to Accounting.',
         ],

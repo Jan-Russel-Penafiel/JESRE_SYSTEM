@@ -446,12 +446,14 @@ require_once __DIR__ . '/includes/layout_top.php';
                     $rowId = (int) $row['id'];
                     $canManage = $department !== 'inventory'
                         && $department !== 'production'
+                        && !($department === 'purchasing' && !empty($row['inventory_confirmed_at']))
                         && !($department === 'sales' && ($row['status'] ?? '') === 'approved')
                         && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
                             || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
                     $canPurchasingDecide = $department === 'purchasing'
                         && can_purchasing_process_purchase_order($row)
                         && can_user_access_department($user ?? [], 'purchasing');
+                    $purchasingActionLabel = $canPurchasingDecide ? purchasing_purchase_order_action_label($row) : null;
                     $isApproved = ($row['status'] ?? '') === 'approved';
                     $receiptPayload = null;
                     if ($department === 'sales') {
@@ -500,9 +502,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                                     <button type="button" onclick="openModal('edit-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100">Edit</button>
                                     <button type="button" onclick="openModal('delete-<?= e($department) ?>-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100">Delete</button>
                                 <?php endif; ?>
-                                <?php if ($canPurchasingDecide): ?>
-                                    <button type="button" onclick="openModal('approve-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100">Process PO</button>
-                                    <button type="button" onclick="openModal('reject-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100">Reject PO</button>
+                                <?php if ($purchasingActionLabel !== null): ?>
+                                    <button type="button" onclick="openModal('approve-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100"><?= e($purchasingActionLabel) ?></button>
                                 <?php endif; ?>
                             </div>
                         </td>
@@ -661,11 +662,11 @@ require_once __DIR__ . '/includes/layout_top.php';
     <div id="prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')">
         <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
             <div class="flex items-start justify-between gap-3">
-                <h4 class="text-lg font-extrabold text-slate-900">Confirm Purchase Order #<?= e((string) $purchaseOrderRowId) ?></h4>
+                <h4 class="text-lg font-extrabold text-slate-900">Confirm Request #<?= e((string) $purchaseOrderRowId) ?></h4>
                 <button type="button" onclick="closeModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
             </div>
 
-            <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+            <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2" data-disable-on-submit>
                 <?= csrf_input() ?>
                 <input type="hidden" name="action" value="inventory_prepare_purchase_order">
                 <input type="hidden" name="dept" value="purchasing">
@@ -709,7 +710,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                 </div>
 
                 <div class="md:col-span-2 flex justify-end">
-                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Confirm Purchase Order</button>
+                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Confirm</button>
                 </div>
             </form>
         </div>
@@ -779,7 +780,10 @@ require_once __DIR__ . '/includes/layout_top.php';
                             <td class="py-2 pr-3"><?= e((string) ($purchaseOrderRow['supplier_name'] ?? '-')) ?></td>
                             <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($purchaseOrderRow['estimated_total'] ?? 0))) ?></td>
                             <td class="py-2 text-right">
-                                <button type="button" onclick="openModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100">Confirm PO</button>
+                                <?php $inventoryActionLabel = inventory_purchase_order_action_label($purchaseOrderRow); ?>
+                                <?php if ($inventoryActionLabel !== null): ?>
+                                    <button type="button" onclick="openModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100"><?= e($inventoryActionLabel) ?></button>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -897,10 +901,10 @@ require_once __DIR__ . '/includes/layout_top.php';
 <?php
 $purchaseWorkflowModalId = $department === 'production' ? 'modal-production-purchase-request' : 'modal-inventory-purchase-order';
 $purchaseWorkflowTitle = $department === 'production' ? 'Prepare Purchase Request' : 'New Purchase Order';
-$purchaseWorkflowSubmit = $department === 'production' ? 'Save Purchase Request' : 'Confirm Purchase Order';
+$purchaseWorkflowSubmit = $department === 'production' ? 'Save Purchase Request' : 'Confirm';
 $purchaseWorkflowNote = $department === 'production'
     ? 'Production sends this request when stock is low after order preparation.'
-    : 'Inventory confirms this purchase order for Purchasing processing.';
+    : 'Inventory confirms this purchase order and forwards it to Purchasing.';
 ?>
 <div id="<?= e($purchaseWorkflowModalId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, '<?= e($purchaseWorkflowModalId) ?>')">
     <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
@@ -912,7 +916,7 @@ $purchaseWorkflowNote = $department === 'production'
             <button type="button" onclick="closeModal('<?= e($purchaseWorkflowModalId) ?>')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
         </div>
 
-        <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2">
+        <form method="post" action="handlers.php" class="mt-4 grid gap-3 md:grid-cols-2"<?= $department === 'inventory' ? ' data-disable-on-submit' : '' ?>>
             <?= csrf_input() ?>
             <input type="hidden" name="action" value="create_record">
             <input type="hidden" name="dept" value="purchasing">
@@ -1109,12 +1113,14 @@ $purchaseWorkflowNote = $department === 'production'
     $rowId = (int) $row['id'];
     $canManage = $department !== 'inventory'
         && $department !== 'production'
+        && !($department === 'purchasing' && !empty($row['inventory_confirmed_at']))
         && !($department === 'sales' && ($row['status'] ?? '') === 'approved')
         && ((($user['role'] ?? '') === ROLE_GENERAL_MANAGER)
             || (int) ($row['submitted_by'] ?? 0) === (int) ($user['id'] ?? 0));
     $canPurchasingDecide = $department === 'purchasing'
-        && ($row['status'] ?? '') === 'pending'
+        && can_purchasing_process_purchase_order($row)
         && can_user_access_department($user ?? [], 'purchasing');
+    $purchasingActionLabel = $canPurchasingDecide ? purchasing_purchase_order_action_label($row) : null;
     $isApproved = ($row['status'] ?? '') === 'approved';
     ?>
 
@@ -1350,48 +1356,25 @@ $purchaseWorkflowNote = $department === 'production'
         </div>
     <?php endif; ?>
 
-    <?php if ($canPurchasingDecide): ?>
+    <?php if ($purchasingActionLabel !== null): ?>
         <div id="approve-purchase-order-<?= e((string) $rowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'approve-purchase-order-<?= e((string) $rowId) ?>')">
             <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
-                <h4 class="text-lg font-extrabold text-slate-900">Process Purchase Order #<?= e((string) $rowId) ?></h4>
-                <p class="mt-2 text-sm text-slate-600">Processing sends this order to the General Manager for final purchase approval.</p>
+                <h4 class="text-lg font-extrabold text-slate-900">Make Order #<?= e((string) $rowId) ?></h4>
+                <p class="mt-2 text-sm text-slate-600">Making this order sends it to the General Manager for final purchase approval.</p>
 
-                <form method="post" action="handlers.php" class="mt-4 space-y-3">
+                <form method="post" action="handlers.php" class="mt-4 space-y-3" data-disable-on-submit>
                     <?= csrf_input() ?>
                     <input type="hidden" name="action" value="purchasing_decide_purchase_order">
                     <input type="hidden" name="dept" value="purchasing">
                     <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">
                     <input type="hidden" name="decision" value="processed">
                     <div>
-                        <label class="block text-sm font-semibold text-slate-700">Processing Note (optional)</label>
+                        <label class="block text-sm font-semibold text-slate-700">Order Note (optional)</label>
                         <textarea name="approval_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"></textarea>
                     </div>
                     <div class="flex justify-end gap-2">
                         <button type="button" onclick="closeModal('approve-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
-                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500">Process PO</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div id="reject-purchase-order-<?= e((string) $rowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'reject-purchase-order-<?= e((string) $rowId) ?>')">
-            <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
-                <h4 class="text-lg font-extrabold text-slate-900">Reject Purchase Order #<?= e((string) $rowId) ?></h4>
-                <p class="mt-2 text-sm text-slate-600">Rejected purchase orders remain visible for correction and resubmission.</p>
-
-                <form method="post" action="handlers.php" class="mt-4 space-y-3">
-                    <?= csrf_input() ?>
-                    <input type="hidden" name="action" value="purchasing_decide_purchase_order">
-                    <input type="hidden" name="dept" value="purchasing">
-                    <input type="hidden" name="id" value="<?= e((string) $rowId) ?>">
-                    <input type="hidden" name="decision" value="rejected">
-                    <div>
-                        <label class="block text-sm font-semibold text-slate-700">Reason for Rejection</label>
-                        <textarea name="approval_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required></textarea>
-                    </div>
-                    <div class="flex justify-end gap-2">
-                        <button type="button" onclick="closeModal('reject-purchase-order-<?= e((string) $rowId) ?>')" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
-                        <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">Reject PO</button>
+                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500"><?= e($purchasingActionLabel) ?></button>
                     </div>
                 </form>
             </div>
@@ -1518,8 +1501,34 @@ $purchaseWorkflowNote = $department === 'production'
                 });
             }
 
-            document.addEventListener('DOMContentLoaded', initializePurchasingUnitType);
-            window.addEventListener('load', initializePurchasingUnitType);
+            function initializeSingleSubmitForms() {
+                document.querySelectorAll('form[data-disable-on-submit]').forEach(function (form) {
+                    if (form.dataset.singleSubmitBound === '1') {
+                        return;
+                    }
+
+                    form.dataset.singleSubmitBound = '1';
+                    form.addEventListener('submit', function () {
+                        const submitButton = form.querySelector('button[type="submit"]');
+                        if (!submitButton || submitButton.disabled) {
+                            return;
+                        }
+
+                        submitButton.disabled = true;
+                        submitButton.classList.add('cursor-not-allowed', 'opacity-60');
+                        submitButton.textContent = 'Submitted';
+                    });
+                });
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                initializePurchasingUnitType();
+                initializeSingleSubmitForms();
+            });
+            window.addEventListener('load', function () {
+                initializePurchasingUnitType();
+                initializeSingleSubmitForms();
+            });
         })();
     </script>
 <?php endif; ?>

@@ -1031,34 +1031,6 @@ try {
             }
         }
 
-        if ($department === 'sales') {
-            $salesBeverageName = (string) ($data['beverage_name'] ?? '');
-            $salesQtyRequested = (int) ($data['quantity'] ?? 0);
-
-            $producedStmt = $pdo->prepare(
-                "SELECT COALESCE(SUM(quantity_prepared), 0) FROM production_logs
-                 WHERE LOWER(beverage_name) = LOWER(?) AND status = 'approved' AND DATE(created_at) = CURDATE()"
-            );
-            $producedStmt->execute([$salesBeverageName]);
-            $totalProduced = (int) $producedStmt->fetchColumn();
-
-            $soldStmt = $pdo->prepare(
-                "SELECT COALESCE(SUM(quantity), 0) FROM sales_orders
-                 WHERE LOWER(beverage_name) = LOWER(?) AND status = 'approved' AND DATE(created_at) = CURDATE()"
-            );
-            $soldStmt->execute([$salesBeverageName]);
-            $totalSold = (int) $soldStmt->fetchColumn();
-
-            $productionRemaining = $totalProduced - $totalSold;
-            if ($productionRemaining < $salesQtyRequested) {
-                throw new RuntimeException(
-                    'Not enough production stock for ' . $salesBeverageName . '. '
-                    . 'Available: ' . max(0, $productionRemaining) . ' cup(s). '
-                    . 'Please log production first before recording this sale.'
-                );
-            }
-        }
-
         $stmt = $pdo->prepare("INSERT INTO {$table} ({$columnSql}) VALUES ({$placeholders})");
         $stmt->execute(array_values($data));
 
@@ -1462,7 +1434,7 @@ try {
             $record,
             $updatedRecord,
             (int) ($user['id'] ?? 0),
-            'Inventory Department confirmed purchase order #' . $id . ' for Purchasing processing.',
+            'Inventory Department confirmed purchase order #' . $id . ' and forwarded it to Purchasing.',
             'user'
         );
 
@@ -1499,7 +1471,7 @@ try {
         }
 
         if (!can_purchasing_process_purchase_order($record)) {
-            throw new RuntimeException('Only Inventory-confirmed purchase orders can be processed by Purchasing.');
+            throw new RuntimeException('Only Inventory-confirmed purchase orders can be made by Purchasing.');
         }
 
         if ($decision === 'processed') {
@@ -1535,7 +1507,7 @@ try {
             $approvalNote !== ''
                 ? $approvalNote
                 : ($decision === 'processed'
-                    ? 'Purchase order processed by Purchasing Department and sent to General Manager for final approval.'
+                    ? 'Purchase order made by Purchasing Department and sent to General Manager for final approval.'
                     : 'Purchase order rejected by Purchasing Department.'),
             'user'
         );
@@ -1550,7 +1522,7 @@ try {
         set_flash(
             'success',
             $decision === 'processed'
-                ? 'Purchase order #' . $id . ' processed and sent to General Manager for final approval.'
+                ? 'Purchase order #' . $id . ' made and sent to General Manager for final approval.'
                 : 'Purchase order #' . $id . ' has been rejected.'
         );
         $redirectToDepartment('purchasing');
@@ -1582,7 +1554,7 @@ try {
         }
 
         if ($department === 'purchasing' && !can_general_manager_finalize_purchase_order($record)) {
-            throw new RuntimeException('Purchase order must be confirmed by Inventory and processed by Purchasing before General Manager final approval.');
+            throw new RuntimeException('Purchase order must be confirmed by Inventory and made by Purchasing before General Manager final approval.');
         }
 
         if ($decision === 'approved') {

@@ -29,7 +29,7 @@ function purchase_workflow_stage_label(array $record): string
 
     $labels = [
         'inventory_review' => 'Inventory Review',
-        'purchasing_processing' => 'Purchasing Processing',
+        'purchasing_processing' => 'Purchasing Make Order',
         'gm_review' => 'GM Final Approval',
         'finalized' => 'Finalized',
         'rejected' => 'Rejected',
@@ -51,4 +51,14 @@ function can_purchasing_process_purchase_order(array $record): bool
 function can_general_manager_finalize_purchase_order(array $record): bool
 {
     return purchase_workflow_stage($record) === 'gm_review';
+}
+
+function inventory_purchase_order_action_label(array $record): ?string
+{
+    return can_inventory_confirm_purchase_order($record) ? 'Confirm' : null;
+}
+
+function purchasing_purchase_order_action_label(array $record): ?string
+{
+    return can_purchasing_process_purchase_order($record) ? 'Make Order' : null;
 }
