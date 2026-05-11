@@ -26,6 +26,7 @@ assert_true(function_exists('can_purchasing_process_purchase_order'), 'can_purch
 assert_true(function_exists('can_general_manager_finalize_purchase_order'), 'can_general_manager_finalize_purchase_order() must be defined.');
 assert_true(function_exists('inventory_purchase_order_action_label'), 'inventory_purchase_order_action_label() must be defined.');
 assert_true(function_exists('purchasing_purchase_order_action_label'), 'purchasing_purchase_order_action_label() must be defined.');
+assert_true(function_exists('resolve_purchase_request_source_department'), 'resolve_purchase_request_source_department() must be defined.');
 
 $productionRequest = [
     'status' => 'pending',
@@ -75,5 +76,20 @@ $rejected = [
     'purchasing_processed_at' => null,
 ];
 assert_same('rejected', purchase_workflow_stage($rejected), 'Rejected purchase orders should remain rejected.');
+
+$inventoryUser = [
+    'role' => 'department_head',
+    'department' => 'inventory',
+];
+assert_same('inventory', resolve_purchase_request_source_department($inventoryUser, 'inventory'), 'Inventory staff should create Inventory-confirmed purchase orders.');
+assert_same('inventory', resolve_purchase_request_source_department($inventoryUser, 'production'), 'Inventory staff must not spoof the Production source through redirect_dept.');
+
+$generalManagerUser = [
+    'role' => 'general_manager',
+    'department' => null,
+];
+assert_same('inventory', resolve_purchase_request_source_department($generalManagerUser, 'inventory'), 'GM acting from Inventory should use Inventory as the purchase workflow source.');
+assert_same('production', resolve_purchase_request_source_department($generalManagerUser, 'production'), 'GM acting from Production should use Production as the purchase workflow source.');
+assert_same('', resolve_purchase_request_source_department($generalManagerUser, 'purchasing'), 'Purchasing page should not be treated as an upstream request source.');
 
 echo "Purchase workflow tests passed.\n";

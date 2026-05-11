@@ -62,3 +62,17 @@ function purchasing_purchase_order_action_label(array $record): ?string
 {
     return can_purchasing_process_purchase_order($record) ? 'Make Order' : null;
 }
+
+function resolve_purchase_request_source_department(array $user, string $redirectDepartment): string
+{
+    $userDepartment = (string) ($user['department'] ?? '');
+    if (in_array($userDepartment, ['production', 'inventory'], true)) {
+        return $userDepartment;
+    }
+
+    if (($user['role'] ?? null) === 'general_manager' && in_array($redirectDepartment, ['production', 'inventory'], true)) {
+        return $redirectDepartment;
+    }
+
+    return '';
+}

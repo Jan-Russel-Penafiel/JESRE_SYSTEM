@@ -954,7 +954,7 @@ try {
             $data['quoted_unit_cost'] = $quotedUnitCost === null ? null : (float) $quotedUnitCost;
             $data['request_code'] = ($data['request_code'] ?? null) ?: next_purchase_request_code($pdo);
             $data['estimated_total'] = $data['quoted_unit_cost'] === null ? 0 : round((float) $data['quoted_unit_cost'] * $data['requested_qty'], 2);
-            $sourceDepartment = (string) ($user['department'] ?? '');
+            $sourceDepartment = resolve_purchase_request_source_department($user ?? [], $redirectDepartment);
             if (in_array($sourceDepartment, ['production', 'inventory'], true)) {
                 $sourceNote = $sourceDepartment === 'production'
                     ? '[Production Purchase Request]'
@@ -1041,7 +1041,7 @@ try {
             ? 'Record created and processed in real-time POS mode.'
             : 'Record created and queued for manager review.';
         if ($department === 'purchasing') {
-            $sourceDepartment = (string) ($user['department'] ?? '');
+            $sourceDepartment = resolve_purchase_request_source_department($user ?? [], $redirectDepartment);
             if ($sourceDepartment === 'production') {
                 $createAuditNote = 'Production Department sent a purchase request to Inventory review.';
             } elseif ($sourceDepartment === 'inventory') {
@@ -1084,7 +1084,7 @@ try {
             ? (department_label($department) . ' record saved and locked.')
             : (department_label($department) . ' record created and queued for manager review.');
         if ($department === 'purchasing') {
-            $sourceDepartment = (string) ($user['department'] ?? '');
+            $sourceDepartment = resolve_purchase_request_source_department($user ?? [], $redirectDepartment);
             if ($sourceDepartment === 'production') {
                 $successMessage = 'Purchase request sent to Inventory Department.';
             } elseif ($sourceDepartment === 'inventory') {

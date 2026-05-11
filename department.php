@@ -656,7 +656,9 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
     </article>
 </section>
+<?php endif; ?>
 
+<?php if ($isInventoryDepartment): ?>
 <?php foreach ($inventoryPurchaseOrderRows as $purchaseOrderRow): ?>
     <?php $purchaseOrderRowId = (int) ($purchaseOrderRow['id'] ?? 0); ?>
     <div id="prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')">
@@ -716,9 +718,6 @@ require_once __DIR__ . '/includes/layout_top.php';
         </div>
     </div>
 <?php endforeach; ?>
-<?php endif; ?>
-
-<?php if ($isInventoryDepartment): ?>
 <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
     <h4 class="text-sm font-extrabold text-slate-900">Low and High Stock Levels</h4>
     <p class="mt-1 text-xs text-slate-500">Inventory prepares purchase orders for Purchasing approval from this stock review.</p>
@@ -782,7 +781,23 @@ require_once __DIR__ . '/includes/layout_top.php';
                             <td class="py-2 text-right">
                                 <?php $inventoryActionLabel = inventory_purchase_order_action_label($purchaseOrderRow); ?>
                                 <?php if ($inventoryActionLabel !== null): ?>
-                                    <button type="button" onclick="openModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100"><?= e($inventoryActionLabel) ?></button>
+                                    <div class="inline-flex items-center gap-2">
+                                        <form method="post" action="handlers.php" class="m-0" data-disable-on-submit>
+                                            <?= csrf_input() ?>
+                                            <input type="hidden" name="action" value="inventory_prepare_purchase_order">
+                                            <input type="hidden" name="dept" value="purchasing">
+                                            <input type="hidden" name="redirect_dept" value="inventory">
+                                            <input type="hidden" name="id" value="<?= e((string) $purchaseOrderRowId) ?>">
+                                            <input type="hidden" name="inventory_item_id" value="<?= e((string) ($purchaseOrderRow['inventory_item_id'] ?? '')) ?>">
+                                            <input type="hidden" name="requested_qty" value="<?= e((string) ($purchaseOrderRow['requested_qty'] ?? '')) ?>">
+                                            <input type="hidden" name="supplier_name" value="<?= e((string) ($purchaseOrderRow['supplier_name'] ?? '')) ?>">
+                                            <input type="hidden" name="quoted_unit_cost" value="<?= e((string) ($purchaseOrderRow['quoted_unit_cost'] ?? '')) ?>">
+                                            <input type="hidden" name="expected_delivery_date" value="<?= e((string) ($purchaseOrderRow['expected_delivery_date'] ?? '')) ?>">
+                                            <input type="hidden" name="notes" value="<?= e((string) ($purchaseOrderRow['notes'] ?? '')) ?>">
+                                            <button type="submit" class="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 hover:bg-brand-100"><?= e($inventoryActionLabel) ?></button>
+                                        </form>
+                                        <button type="button" onclick="openModal('prepare-inventory-po-<?= e((string) $purchaseOrderRowId) ?>')" class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50">Review</button>
+                                    </div>
                                 <?php endif; ?>
                             </td>
                         </tr>
