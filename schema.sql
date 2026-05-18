@@ -151,6 +151,23 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     CONSTRAINT fk_sales_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS sales_order_items (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    sales_order_id INT UNSIGNED NOT NULL,
+    beverage_name VARCHAR(120) NOT NULL,
+    quantity INT UNSIGNED NOT NULL,
+    unit_price DECIMAL(12,2) NOT NULL,
+    total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    inventory_item_id INT UNSIGNED NULL,
+    ingredient_item_ids TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sales_order_items_order (sales_order_id),
+    INDEX idx_sales_order_items_beverage (beverage_name),
+    CONSTRAINT fk_sales_order_items_order FOREIGN KEY (sales_order_id) REFERENCES sales_orders (id) ON DELETE CASCADE,
+    CONSTRAINT fk_sales_order_items_inventory FOREIGN KEY (inventory_item_id) REFERENCES inventory_items (id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS accounting_entries (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     entry_type ENUM('income', 'expense') NOT NULL,

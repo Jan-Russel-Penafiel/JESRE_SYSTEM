@@ -42,9 +42,10 @@ Manager review remains available as an oversight layer for pending non-POS recor
      - Straw -> 1
 4. Sales Process (Simplified)
    - Staff selects:
-     - Flavor (e.g., Caramel Macchiato)
-     - Quantity
+     - One or more flavors (e.g., Caramel Macchiato and Strawberry)
+     - Quantity and unit price per flavor
    - System will:
+     - Save the selected flavors under one order code and receipt
      - Auto-compute required ingredients
      - Auto-deduct from inventory
    - Example:
@@ -89,6 +90,7 @@ Manager review remains available as an oversight layer for pending non-POS recor
   - Send purchase requests to Inventory when stock is low
 - Sales Department
   - Process customer orders directly in POS
+  - Add multiple products or flavors to one customer transaction
   - Log daily production from the Sales Department
   - Select beverage recipe (flavor) and quantity
   - Set per-cup and per-straw consumption values
@@ -205,6 +207,7 @@ Inventory monitoring:
 - `audit_logs.php` - General Manager audit trail browser
 - `reports.php` - Final consolidated reports
 - `handlers.php` - POST actions and approval automation
+- `scripts/2026_05_18_sales_order_items.sql` - Upgrade migration for multi-item sales receipts
 - `includes/` - Reusable helpers, auth, DB, layout
 
 ## Setup Instructions (XAMPP)
@@ -218,8 +221,9 @@ Inventory monitoring:
 
 Upgrade note:
 - Existing databases must run `scripts/2026_05_10_purchase_workflow.sql` once to add the Inventory confirmation and Purchasing processing columns used by the updated purchase workflow.
+- Existing databases must run `scripts/2026_05_18_sales_order_items.sql` once to add sales order line items and backfill existing one-flavor sales.
 
-If you are upgrading from an earlier version of this project, back up data first, then recreate the database from `schema.sql` so Purchasing and POS schema updates are fully applied.
+If you are upgrading from a much earlier version, back up data first, then either run the listed upgrade scripts in order or recreate the database from `schema.sql`.
 
 ## Default Accounts
 

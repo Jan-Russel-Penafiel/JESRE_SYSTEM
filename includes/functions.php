@@ -206,12 +206,22 @@ function fetch_sales_trend_snapshot(PDO $pdo, int $days = 7): array
     $stmt->execute([$fromDate, $fromDate, $fromDate]);
     $totals = $stmt->fetch() ?: [];
 
-    $topStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
-        FROM sales_orders
-        WHERE status = 'approved' AND DATE(created_at) >= ?
-        GROUP BY beverage_name
-        ORDER BY total_qty DESC, total_revenue DESC
-        LIMIT 1");
+    if (sales_order_items_table_exists($pdo)) {
+        $topStmt = $pdo->prepare("SELECT soi.beverage_name, SUM(soi.quantity) AS total_qty, SUM(soi.total_amount) AS total_revenue
+            FROM sales_order_items soi
+            JOIN sales_orders so ON so.id = soi.sales_order_id
+            WHERE so.status = 'approved' AND DATE(so.created_at) >= ?
+            GROUP BY soi.beverage_name
+            ORDER BY total_qty DESC, total_revenue DESC
+            LIMIT 1");
+    } else {
+        $topStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
+            FROM sales_orders
+            WHERE status = 'approved' AND DATE(created_at) >= ?
+            GROUP BY beverage_name
+            ORDER BY total_qty DESC, total_revenue DESC
+            LIMIT 1");
+    }
     $topStmt->execute([$fromDate]);
     $top = $topStmt->fetch() ?: null;
 
@@ -247,21 +257,41 @@ function fetch_sales_performance_snapshot(PDO $pdo, int $days = 30): array
     $days = max(1, $days);
     $fromDate = date('Y-m-d', strtotime('-' . ($days - 1) . ' days'));
 
-    $topStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
-        FROM sales_orders
-        WHERE status = 'approved' AND DATE(created_at) >= ?
-        GROUP BY beverage_name
-        ORDER BY total_qty DESC, total_revenue DESC
-        LIMIT 1");
+    if (sales_order_items_table_exists($pdo)) {
+        $topStmt = $pdo->prepare("SELECT soi.beverage_name, SUM(soi.quantity) AS total_qty, SUM(soi.total_amount) AS total_revenue
+            FROM sales_order_items soi
+            JOIN sales_orders so ON so.id = soi.sales_order_id
+            WHERE so.status = 'approved' AND DATE(so.created_at) >= ?
+            GROUP BY soi.beverage_name
+            ORDER BY total_qty DESC, total_revenue DESC
+            LIMIT 1");
+    } else {
+        $topStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
+            FROM sales_orders
+            WHERE status = 'approved' AND DATE(created_at) >= ?
+            GROUP BY beverage_name
+            ORDER BY total_qty DESC, total_revenue DESC
+            LIMIT 1");
+    }
     $topStmt->execute([$fromDate]);
     $top = $topStmt->fetch() ?: null;
 
-    $lowStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
-        FROM sales_orders
-        WHERE status = 'approved' AND DATE(created_at) >= ?
-        GROUP BY beverage_name
-        ORDER BY total_qty ASC, total_revenue ASC
-        LIMIT 1");
+    if (sales_order_items_table_exists($pdo)) {
+        $lowStmt = $pdo->prepare("SELECT soi.beverage_name, SUM(soi.quantity) AS total_qty, SUM(soi.total_amount) AS total_revenue
+            FROM sales_order_items soi
+            JOIN sales_orders so ON so.id = soi.sales_order_id
+            WHERE so.status = 'approved' AND DATE(so.created_at) >= ?
+            GROUP BY soi.beverage_name
+            ORDER BY total_qty ASC, total_revenue ASC
+            LIMIT 1");
+    } else {
+        $lowStmt = $pdo->prepare("SELECT beverage_name, SUM(quantity) AS total_qty, SUM(total_amount) AS total_revenue
+            FROM sales_orders
+            WHERE status = 'approved' AND DATE(created_at) >= ?
+            GROUP BY beverage_name
+            ORDER BY total_qty ASC, total_revenue ASC
+            LIMIT 1");
+    }
     $lowStmt->execute([$fromDate]);
     $low = $lowStmt->fetch() ?: null;
 
@@ -419,6 +449,213 @@ function format_inventory_item_selection($raw, array $inventoryMap): string
     }
 
     return implode(', ', $labels);
+}
+
+function validate_sales_order_items_input(array $source): array
+{
+    $rawItems = $source['sales_items'] ?? null;
+    $candidateItems = [];
+
+    if (is_array($rawItems)) {
+        $candidateItems = $rawItems;
+    } else {
+        $candidateItems[] = [
+            'beverage_name' => $source['beverage_name'] ?? '',
+            'quantity' => $source['quantity'] ?? '',
+            'unit_price' => $source['unit_price'] ?? '',
+        ];
+    }
+
+    $items = [];
+    $errors = [];
+
+    foreach ($candidateItems as $index => $candidateItem) {
+        if (!is_array($candidateItem)) {
+            $errors[] = 'Sales item #' . ((int) $index + 1) . ' is invalid.';
+            continue;
+        }
+
+        $beverageName = trim((string) ($candidateItem['beverage_name'] ?? ''));
+        $quantityRaw = trim((string) ($candidateItem['quantity'] ?? ''));
+        $unitPriceRaw = trim((string) ($candidateItem['unit_price'] ?? ''));
+
+        if ($beverageName === '' && $quantityRaw === '' && $unitPriceRaw === '') {
+            continue;
+        }
+
+        $itemLabel = 'Sales item #' . ((int) $index + 1);
+        if ($beverageName === '') {
+            $errors[] = $itemLabel . ' coffee flavor is required.';
+            continue;
+        }
+
+        if (strlen($beverageName) > 120) {
+            $errors[] = $itemLabel . ' coffee flavor must be 120 characters or less.';
+            continue;
+        }
+
+        if ($quantityRaw === '' || !is_numeric($quantityRaw)) {
+            $errors[] = $itemLabel . ' quantity must be a valid number.';
+            continue;
+        }
+
+        $quantityNumber = (float) $quantityRaw;
+        if ($quantityNumber <= 0 || floor($quantityNumber) !== $quantityNumber) {
+            $errors[] = $itemLabel . ' quantity must be a whole number greater than zero.';
+            continue;
+        }
+
+        if ($unitPriceRaw === '' || !is_numeric($unitPriceRaw)) {
+            $errors[] = $itemLabel . ' unit price must be a valid number.';
+            continue;
+        }
+
+        $unitPrice = round((float) $unitPriceRaw, 2);
+        if ($unitPrice <= 0) {
+            $errors[] = $itemLabel . ' unit price must be greater than zero.';
+            continue;
+        }
+
+        $quantity = (int) $quantityNumber;
+        $items[] = [
+            'beverage_name' => $beverageName,
+            'quantity' => $quantity,
+            'unit_price' => $unitPrice,
+            'total_amount' => round($quantity * $unitPrice, 2),
+        ];
+    }
+
+    if ($items === []) {
+        $errors[] = 'Add at least one sales item.';
+    }
+
+    return [$items, $errors];
+}
+
+function summarize_sales_order_items(array $items): array
+{
+    $names = [];
+    $totalQuantity = 0;
+    $totalAmount = 0.0;
+
+    foreach ($items as $item) {
+        $beverageName = trim((string) ($item['beverage_name'] ?? ''));
+        if ($beverageName !== '' && !in_array($beverageName, $names, true)) {
+            $names[] = $beverageName;
+        }
+
+        $quantity = (int) ($item['quantity'] ?? 0);
+        $unitPrice = (float) ($item['unit_price'] ?? 0);
+        $totalQuantity += max(0, $quantity);
+        $totalAmount += max(0, $quantity) * max(0, $unitPrice);
+    }
+
+    $summary = implode(', ', $names);
+    if (strlen($summary) > 120) {
+        $summary = rtrim(substr($summary, 0, 117)) . '...';
+    }
+
+    $totalAmount = round($totalAmount, 2);
+    $averageUnitPrice = $totalQuantity > 0 ? round($totalAmount / $totalQuantity, 2) : 0.0;
+
+    return [
+        $summary,
+        [
+            'quantity' => $totalQuantity,
+            'unit_price' => $averageUnitPrice,
+            'total_amount' => $totalAmount,
+        ],
+    ];
+}
+
+function sales_order_items_table_exists(PDO $pdo): bool
+{
+    static $exists = null;
+
+    if ($exists !== null) {
+        return $exists;
+    }
+
+    $stmt = $pdo->query("SHOW TABLES LIKE 'sales_order_items'");
+    $exists = (bool) $stmt->fetchColumn();
+
+    return $exists;
+}
+
+function fetch_sales_order_items(PDO $pdo, int $salesOrderId): array
+{
+    if ($salesOrderId <= 0 || !sales_order_items_table_exists($pdo)) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare('SELECT id, sales_order_id, beverage_name, quantity, unit_price, total_amount, inventory_item_id, ingredient_item_ids
+        FROM sales_order_items
+        WHERE sales_order_id = ?
+        ORDER BY id ASC');
+    $stmt->execute([$salesOrderId]);
+
+    return $stmt->fetchAll() ?: [];
+}
+
+function fetch_sales_order_items_grouped(PDO $pdo, array $salesOrderIds): array
+{
+    $ids = [];
+    foreach ($salesOrderIds as $salesOrderId) {
+        $id = (int) $salesOrderId;
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+
+    if ($ids === [] || !sales_order_items_table_exists($pdo)) {
+        return [];
+    }
+
+    $idList = array_values($ids);
+    $placeholders = implode(', ', array_fill(0, count($idList), '?'));
+    $stmt = $pdo->prepare("SELECT id, sales_order_id, beverage_name, quantity, unit_price, total_amount, inventory_item_id, ingredient_item_ids
+        FROM sales_order_items
+        WHERE sales_order_id IN ({$placeholders})
+        ORDER BY sales_order_id ASC, id ASC");
+    $stmt->execute($idList);
+
+    $grouped = [];
+    foreach (($stmt->fetchAll() ?: []) as $item) {
+        $orderId = (int) ($item['sales_order_id'] ?? 0);
+        if ($orderId <= 0) {
+            continue;
+        }
+
+        $grouped[$orderId][] = $item;
+    }
+
+    return $grouped;
+}
+
+function sales_order_receipt_items(array $record, array $items = []): array
+{
+    if ($items === []) {
+        $items[] = [
+            'beverage_name' => (string) ($record['beverage_name'] ?? '-'),
+            'quantity' => (int) ($record['quantity'] ?? 0),
+            'unit_price' => (float) ($record['unit_price'] ?? 0),
+            'total_amount' => (float) ($record['total_amount'] ?? 0),
+        ];
+    }
+
+    $receiptItems = [];
+    foreach ($items as $item) {
+        $quantity = (int) ($item['quantity'] ?? 0);
+        $unitPrice = (float) ($item['unit_price'] ?? 0);
+        $receiptItems[] = [
+            'beverage_name' => (string) ($item['beverage_name'] ?? '-'),
+            'quantity' => $quantity,
+            'unit_price' => $unitPrice,
+            'total_amount' => round((float) ($item['total_amount'] ?? ($quantity * $unitPrice)), 2),
+        ];
+    }
+
+    return $receiptItems;
 }
 
 function next_order_code(PDO $pdo): string

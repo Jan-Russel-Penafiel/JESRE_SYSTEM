@@ -610,6 +610,33 @@ INSERT INTO `sales_orders` (`id`, `order_code`, `customer_name`, `beverage_name`
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `sales_order_items`
+--
+
+CREATE TABLE `sales_order_items` (
+  `id` int(10) UNSIGNED NOT NULL,
+  `sales_order_id` int(10) UNSIGNED NOT NULL,
+  `beverage_name` varchar(120) NOT NULL,
+  `quantity` int(10) UNSIGNED NOT NULL,
+  `unit_price` decimal(12,2) NOT NULL,
+  `total_amount` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `inventory_item_id` int(10) UNSIGNED DEFAULT NULL,
+  `ingredient_item_ids` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Dumping data for table `sales_order_items`
+--
+
+INSERT INTO `sales_order_items` (`id`, `sales_order_id`, `beverage_name`, `quantity`, `unit_price`, `total_amount`, `inventory_item_id`, `ingredient_item_ids`, `created_at`, `updated_at`)
+SELECT `id`, `id`, `beverage_name`, `quantity`, `unit_price`, `total_amount`, `inventory_item_id`, `ingredient_item_ids`, `created_at`, `updated_at`
+FROM `sales_orders`;
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `users`
 --
 
@@ -771,6 +798,15 @@ ALTER TABLE `sales_orders`
   ADD KEY `fk_sales_approved_by` (`approved_by`);
 
 --
+-- Indexes for table `sales_order_items`
+--
+ALTER TABLE `sales_order_items`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_sales_order_items_order` (`sales_order_id`),
+  ADD KEY `idx_sales_order_items_beverage` (`beverage_name`),
+  ADD KEY `fk_sales_order_items_inventory` (`inventory_item_id`);
+
+--
 -- Indexes for table `users`
 --
 ALTER TABLE `users`
@@ -851,6 +887,12 @@ ALTER TABLE `purchase_requests`
 -- AUTO_INCREMENT for table `sales_orders`
 --
 ALTER TABLE `sales_orders`
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
+
+--
+-- AUTO_INCREMENT for table `sales_order_items`
+--
+ALTER TABLE `sales_order_items`
   MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
@@ -942,6 +984,13 @@ ALTER TABLE `sales_orders`
   ADD CONSTRAINT `fk_sales_approved_by` FOREIGN KEY (`approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `fk_sales_inventory_item` FOREIGN KEY (`inventory_item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `fk_sales_submitted_by` FOREIGN KEY (`submitted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `sales_order_items`
+--
+ALTER TABLE `sales_order_items`
+  ADD CONSTRAINT `fk_sales_order_items_inventory` FOREIGN KEY (`inventory_item_id`) REFERENCES `inventory_items` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_sales_order_items_order` FOREIGN KEY (`sales_order_id`) REFERENCES `sales_orders` (`id`) ON DELETE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

@@ -31,6 +31,18 @@ $requireConfig = static function (string $dept): array {
     return $config;
 };
 
+$validationConfigForDepartment = static function (array $config, string $dept): array {
+    if ($dept !== 'sales') {
+        return $config;
+    }
+
+    $config['fields'] = array_values(array_filter($config['fields'], static function (array $field): bool {
+        return !in_array((string) ($field['name'] ?? ''), ['beverage_name', 'quantity', 'unit_price'], true);
+    }));
+
+    return $config;
+};
+
 $canCreateDepartmentRecord = static function (array $currentUser, string $dept): bool {
     if (can_user_access_department($currentUser, $dept)) {
         return true;
@@ -409,6 +421,61 @@ $ensureProductionIngredientAvailability = static function (
     }
 };
 
+$prepareSalesOrderItems = static function (PDO $db, array $items) use ($buildRecipeIngredientIds): array {
+    $preparedItems = [];
+    $selectedIngredientIds = [];
+
+    foreach ($items as $item) {
+        $beverageName = (string) ($item['beverage_name'] ?? '');
+        $recipeItems = fetch_recipe_items_by_beverage($db, $beverageName);
+        $ingredientIds = $buildRecipeIngredientIds($recipeItems);
+        if ($ingredientIds === []) {
+            throw new RuntimeException('No active recipe configured for ' . $beverageName . '.');
+        }
+
+        foreach ($ingredientIds as $ingredientId) {
+            $selectedIngredientIds[$ingredientId] = $ingredientId;
+        }
+
+        $preparedItems[] = [
+            'beverage_name' => $beverageName,
+            'quantity' => (int) ($item['quantity'] ?? 0),
+            'unit_price' => (float) ($item['unit_price'] ?? 0),
+            'total_amount' => (float) ($item['total_amount'] ?? 0),
+            'inventory_item_id' => $ingredientIds[0],
+            'ingredient_item_ids' => inventory_item_ids_to_json($ingredientIds),
+        ];
+    }
+
+    return [$preparedItems, array_values($selectedIngredientIds)];
+};
+
+$insertSalesOrderItems = static function (PDO $db, int $salesOrderId, array $items): void {
+    if ($salesOrderId <= 0) {
+        throw new RuntimeException('Sales order item rows require a valid sales order.');
+    }
+
+    if (!sales_order_items_table_exists($db)) {
+        throw new RuntimeException('Sales order item table is missing. Run scripts/2026_05_18_sales_order_items.sql before processing multi-item sales.');
+    }
+
+    $stmt = $db->prepare('INSERT INTO sales_order_items
+        (sales_order_id, beverage_name, quantity, unit_price, total_amount, inventory_item_id, ingredient_item_ids)
+        VALUES (?, ?, ?, ?, ?, ?, ?)');
+
+    foreach ($items as $item) {
+        $stmt->execute([
+            $salesOrderId,
+            (string) ($item['beverage_name'] ?? ''),
+            (int) ($item['quantity'] ?? 0),
+            (float) ($item['unit_price'] ?? 0),
+            (float) ($item['total_amount'] ?? 0),
+            (int) ($item['inventory_item_id'] ?? 0),
+            $item['ingredient_item_ids'] ?? null,
+        ]);
+    }
+};
+
 $deductInventory = static function (PDO $db, int $inventoryItemId, float $deductQuantity, int $actorId, string $reason) use ($upsertLowStockPurchaseRequest): void {
     if ($inventoryItemId <= 0 || $deductQuantity <= 0) {
         return;
@@ -768,27 +835,35 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
         'system'
     );
 
-    // Record COGS expense: sum ingredient costs consumed for this sale
+    // Record COGS expense: sum ingredient costs consumed for each item in this sale.
     $cogsTotal = 0.0;
-    $cogsRecipeItems = fetch_recipe_items_by_beverage($db, (string) ($record['beverage_name'] ?? ''));
-    foreach ($cogsRecipeItems as $cogsItem) {
-        $cogsItemId = (int) ($cogsItem['inventory_item_id'] ?? 0);
-        if ($cogsItemId <= 0) {
+    $orderItems = sales_order_receipt_items($record, fetch_sales_order_items($db, (int) ($record['id'] ?? 0)));
+    foreach ($orderItems as $orderItem) {
+        $itemQuantity = (float) ($orderItem['quantity'] ?? 0);
+        if ($itemQuantity <= 0) {
             continue;
         }
-        $latestPurchase = $db->prepare(
-            "SELECT quoted_unit_cost, requested_qty FROM purchase_requests
-             WHERE inventory_item_id = ? AND status = 'approved' AND quoted_unit_cost IS NOT NULL AND requested_qty > 0
-             ORDER BY approved_at DESC LIMIT 1"
-        );
-        $latestPurchase->execute([$cogsItemId]);
-        $purchaseRow = $latestPurchase->fetch();
-        if (!$purchaseRow) {
-            continue;
+
+        $cogsRecipeItems = fetch_recipe_items_by_beverage($db, (string) ($orderItem['beverage_name'] ?? ''));
+        foreach ($cogsRecipeItems as $cogsItem) {
+            $cogsItemId = (int) ($cogsItem['inventory_item_id'] ?? 0);
+            if ($cogsItemId <= 0) {
+                continue;
+            }
+            $latestPurchase = $db->prepare(
+                "SELECT quoted_unit_cost, requested_qty FROM purchase_requests
+                 WHERE inventory_item_id = ? AND status = 'approved' AND quoted_unit_cost IS NOT NULL AND requested_qty > 0
+                 ORDER BY approved_at DESC LIMIT 1"
+            );
+            $latestPurchase->execute([$cogsItemId]);
+            $purchaseRow = $latestPurchase->fetch();
+            if (!$purchaseRow) {
+                continue;
+            }
+            $unitCost = (float) $purchaseRow['quoted_unit_cost'] / (float) $purchaseRow['requested_qty'];
+            $qtyUsed = (float) ($cogsItem['required_qty'] ?? 0) * $itemQuantity;
+            $cogsTotal += $unitCost * $qtyUsed;
         }
-        $unitCost = (float) $purchaseRow['quoted_unit_cost'] / (float) $purchaseRow['requested_qty'];
-        $qtyUsed = (float) ($cogsItem['required_qty'] ?? 0) * $quantity;
-        $cogsTotal += $unitCost * $qtyUsed;
     }
     $cogsTotal = round($cogsTotal, 2);
 
@@ -799,7 +874,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
         $insertCogs->execute([
             'COGS ' . $orderCode,
             $cogsTotal,
-            'Cost of goods sold for ' . (string) ($record['beverage_name'] ?? '') . ' x' . (int) $quantity . ' (auto-computed from ingredient costs).',
+            'Cost of goods sold for ' . (string) ($record['beverage_name'] ?? '') . ' (auto-computed from ingredient costs).',
             $record['submitted_by'] ?? null,
             $approverId,
         ]);
@@ -917,7 +992,7 @@ try {
             throw new RuntimeException('Receiving inventory records manually is disabled for this workflow.');
         }
 
-        [$data, $errors] = validate_department_input($config, $_POST);
+        [$data, $errors] = validate_department_input($validationConfigForDepartment($config, $department), $_POST);
         if ($errors) {
             throw new RuntimeException(implode(' ', $errors));
         }
@@ -934,6 +1009,7 @@ try {
         $selectedSalesIngredientIds = [];
         $productionRecipeItems = [];
         $salesRecipeItems = [];
+        $salesOrderItems = [];
 
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
@@ -970,17 +1046,20 @@ try {
         }
 
         if ($department === 'sales') {
-            $data['quantity'] = (int) ($data['quantity'] ?? 0);
-            $data['unit_price'] = (float) ($data['unit_price'] ?? 0);
+            [$salesInputItems, $salesItemErrors] = validate_sales_order_items_input($_POST);
+            if ($salesItemErrors) {
+                throw new RuntimeException(implode(' ', $salesItemErrors));
+            }
+
+            [$salesOrderItems, $selectedSalesIngredientIds] = $prepareSalesOrderItems($pdo, $salesInputItems);
+            [$salesItemSummary, $salesTotals] = summarize_sales_order_items($salesOrderItems);
+
+            $data['beverage_name'] = $salesItemSummary;
+            $data['quantity'] = (int) ($salesTotals['quantity'] ?? 0);
+            $data['unit_price'] = (float) ($salesTotals['unit_price'] ?? 0);
             $data['per_cup_qty'] = 1.0;
             $data['per_straw_qty'] = 1.0;
             $data['stock_deduct_qty'] = 1.0;
-
-            $salesRecipeItems = fetch_recipe_items_by_beverage($pdo, (string) ($data['beverage_name'] ?? ''));
-            $selectedSalesIngredientIds = $buildRecipeIngredientIds($salesRecipeItems);
-            if ($selectedSalesIngredientIds === []) {
-                throw new RuntimeException('No active recipe configured for this beverage.');
-            }
 
             $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
             $data['inventory_item_id'] = $selectedSalesIngredientIds[0];
@@ -990,7 +1069,7 @@ try {
             $data['payment_status'] = 'paid';
             $data['receipt_no'] = next_receipt_code($pdo);
             $data['paid_at'] = date('Y-m-d H:i:s');
-            $data['total_amount'] = $data['quantity'] * $data['unit_price'];
+            $data['total_amount'] = (float) ($salesTotals['total_amount'] ?? 0);
         }
 
         $table = $config['table'];
@@ -1035,6 +1114,10 @@ try {
         $stmt->execute(array_values($data));
 
         $recordId = (int) $pdo->lastInsertId();
+        if ($department === 'sales') {
+            $insertSalesOrderItems($pdo, $recordId, $salesOrderItems);
+        }
+
         $createdRecord = $fetchRecord($pdo, $table, $recordId, false);
 
         $createAuditNote = $realTimeSales
@@ -1129,7 +1212,7 @@ try {
 
         $assertOwnsRecord($user ?? [], $record);
 
-        [$data, $errors] = validate_department_input($config, $_POST);
+        [$data, $errors] = validate_department_input($validationConfigForDepartment($config, $department), $_POST);
         if ($errors) {
             throw new RuntimeException(implode(' ', $errors));
         }
@@ -1146,6 +1229,7 @@ try {
         $selectedSalesIngredientIds = [];
         $productionRecipeItems = [];
         $salesRecipeItems = [];
+        $salesOrderItems = [];
 
         if ($department === 'production') {
             $data['quantity_prepared'] = (int) ($data['quantity_prepared'] ?? 0);
@@ -1169,16 +1253,20 @@ try {
         }
 
         if ($department === 'sales') {
-            $data['quantity'] = (int) ($data['quantity'] ?? 0);
-            $data['unit_price'] = (float) ($data['unit_price'] ?? 0);
+            [$salesInputItems, $salesItemErrors] = validate_sales_order_items_input($_POST);
+            if ($salesItemErrors) {
+                throw new RuntimeException(implode(' ', $salesItemErrors));
+            }
+
+            [$salesOrderItems, $selectedSalesIngredientIds] = $prepareSalesOrderItems($pdo, $salesInputItems);
+            [$salesItemSummary, $salesTotals] = summarize_sales_order_items($salesOrderItems);
+
+            $data['beverage_name'] = $salesItemSummary;
+            $data['quantity'] = (int) ($salesTotals['quantity'] ?? 0);
+            $data['unit_price'] = (float) ($salesTotals['unit_price'] ?? 0);
             $data['stock_deduct_qty'] = 1.0;
             $data['per_cup_qty'] = 1.0;
             $data['per_straw_qty'] = 1.0;
-
-            $selectedSalesIngredientIds = $excludeUtilityIngredientIds($pdo, $data['ingredient_item_ids'] ?? []);
-            if ($selectedSalesIngredientIds === []) {
-                throw new RuntimeException('Please select ingredient items for this order.');
-            }
 
             $data['ingredient_item_ids'] = inventory_item_ids_to_json($selectedSalesIngredientIds);
             $data['inventory_item_id'] = $selectedSalesIngredientIds[0];
@@ -1194,17 +1282,7 @@ try {
             if ($data['paid_at'] === '') {
                 $data['paid_at'] = date('Y-m-d H:i:s');
             }
-            $data['total_amount'] = $data['quantity'] * $data['unit_price'];
-        }
-
-        if ($department === 'sales') {
-            $ensureRecipeIngredientAvailability(
-                $pdo,
-                $salesRecipeItems,
-                (float) ($data['quantity'] ?? 0),
-                (int) ($user['id'] ?? 0),
-                'sales order'
-            );
+            $data['total_amount'] = (float) ($salesTotals['total_amount'] ?? 0);
         }
 
         if ($department === 'production') {
@@ -1256,6 +1334,16 @@ try {
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+
+        if ($department === 'sales') {
+            if (!sales_order_items_table_exists($pdo)) {
+                throw new RuntimeException('Sales order item table is missing. Run scripts/2026_05_18_sales_order_items.sql before processing multi-item sales.');
+            }
+
+            $deleteItems = $pdo->prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?');
+            $deleteItems->execute([$id]);
+            $insertSalesOrderItems($pdo, $id, $salesOrderItems);
+        }
 
         $updatedRecord = $fetchRecord($pdo, $table, $id, false);
         write_audit_log(

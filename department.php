@@ -139,6 +139,10 @@ $stmt = $pdo->prepare("SELECT t.*, su.full_name AS submitted_name, au.full_name 
     LIMIT {$perPage} OFFSET {$offset}");
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
+$salesOrderItemsByOrder = [];
+if ($department === 'sales' && $rows) {
+    $salesOrderItemsByOrder = fetch_sales_order_items_grouped($pdo, array_column($rows, 'id'));
+}
 
 $allInventoryItems = [];
 $approvedInventoryItems = [];
@@ -264,6 +268,17 @@ if ($department === 'sales') {
 
 $todayProductionStock = [];
 if ($department === 'sales') {
+    $soldSubquery = sales_order_items_table_exists($pdo)
+        ? "SELECT LOWER(soi.beverage_name) AS bname, SUM(soi.quantity) AS sold
+            FROM sales_order_items soi
+            JOIN sales_orders so ON so.id = soi.sales_order_id
+            WHERE so.status = 'approved' AND DATE(so.created_at) = CURDATE()
+            GROUP BY LOWER(soi.beverage_name)"
+        : "SELECT LOWER(beverage_name) AS bname, SUM(quantity) AS sold
+            FROM sales_orders
+            WHERE status = 'approved' AND DATE(created_at) = CURDATE()
+            GROUP BY LOWER(beverage_name)";
+
     $stockStmt = $pdo->query(
         "SELECT
             pl.beverage_name,
@@ -271,12 +286,7 @@ if ($department === 'sales') {
             COALESCE(s.sold, 0) AS sold,
             COALESCE(SUM(pl.quantity_prepared), 0) - COALESCE(s.sold, 0) AS remaining
         FROM production_logs pl
-        LEFT JOIN (
-            SELECT LOWER(beverage_name) AS bname, SUM(quantity) AS sold
-            FROM sales_orders
-            WHERE status = 'approved' AND DATE(created_at) = CURDATE()
-            GROUP BY LOWER(beverage_name)
-        ) s ON s.bname = LOWER(pl.beverage_name)
+        LEFT JOIN ({$soldSubquery}) s ON s.bname = LOWER(pl.beverage_name)
         WHERE pl.status = 'approved' AND DATE(pl.created_at) = CURDATE()
         GROUP BY pl.beverage_name, s.sold
         ORDER BY pl.beverage_name ASC"
@@ -357,6 +367,87 @@ if ($isInventoryDepartment) {
 
 $pageTitle = $config['title'];
 $activePage = 'department_' . $department;
+
+$renderSalesOrderItemsBuilder = static function (array $recipeOptions, array $items, string $builderId): void {
+    if ($items === []) {
+        $items = [
+            [
+                'beverage_name' => '',
+                'quantity' => 1,
+                'unit_price' => '',
+            ],
+        ];
+    }
+
+    $renderRow = static function (array $item, $index) use ($recipeOptions): void {
+        $beverageValue = (string) ($item['beverage_name'] ?? '');
+        $quantityValue = (string) ($item['quantity'] ?? 1);
+        $unitPriceValue = (string) ($item['unit_price'] ?? '');
+        ?>
+        <div class="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 sm:grid-cols-[1fr_90px_120px_auto]" data-sales-item-row>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Flavor</label>
+                <select name="sales_items[<?= e((string) $index) ?>][beverage_name]" class="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required data-sales-item-name>
+                    <option value="">Select flavor</option>
+                    <?php foreach ($recipeOptions as $recipeOption): ?>
+                        <?php
+                        $recipeName = (string) ($recipeOption['beverage_name'] ?? '');
+                        $ingredientsTooltip = (string) ($recipeOption['ingredients_label'] ?? 'Ingredients: Not set');
+                        ?>
+                        <option value="<?= e($recipeName) ?>" title="<?= e($ingredientsTooltip) ?>" data-ingredients="<?= e($ingredientsTooltip) ?>" <?= $beverageValue === $recipeName ? 'selected' : '' ?>><?= e($recipeName) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Qty</label>
+                <input type="number" name="sales_items[<?= e((string) $index) ?>][quantity]" value="<?= e($quantityValue) ?>" min="1" step="1" class="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required data-sales-item-quantity>
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide text-slate-500">Unit Price</label>
+                <input type="number" name="sales_items[<?= e((string) $index) ?>][unit_price]" value="<?= e($unitPriceValue) ?>" min="0.01" step="0.01" class="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required data-sales-item-price>
+            </div>
+            <div class="flex items-end">
+                <button type="button" class="w-full rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100" data-sales-remove-item>Remove</button>
+            </div>
+        </div>
+        <?php
+    };
+    ?>
+    <div class="rounded-xl border border-slate-300 bg-slate-50 p-3" data-sales-order-builder id="<?= e($builderId) ?>">
+        <div class="space-y-2" data-sales-items-list>
+            <?php foreach ($items as $index => $item): ?>
+                <?php $renderRow($item, $index); ?>
+            <?php endforeach; ?>
+        </div>
+
+        <template data-sales-item-template>
+            <?php $renderRow(['beverage_name' => '', 'quantity' => 1, 'unit_price' => ''], '__INDEX__'); ?>
+        </template>
+
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <button type="button" class="rounded-xl border border-brand-300 bg-brand-50 px-4 py-2 text-sm font-bold text-brand-700 hover:bg-brand-100" data-sales-add-item>Add Flavor</button>
+            <p class="text-sm font-extrabold text-slate-900">Total: <span data-sales-order-total>PHP 0.00</span></p>
+        </div>
+
+        <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <table class="w-full min-w-[560px] text-left text-xs">
+                <thead class="text-slate-500">
+                    <tr>
+                        <th class="px-3 py-2">Flavor</th>
+                        <th class="px-3 py-2 text-right">Qty</th>
+                        <th class="px-3 py-2 text-right">Unit Price</th>
+                        <th class="px-3 py-2 text-right">Amount</th>
+                    </tr>
+                </thead>
+                <tbody data-sales-items-preview>
+                    <tr><td colspan="4" class="px-3 py-3 text-slate-500">No items selected.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <?php
+};
+
 require_once __DIR__ . '/includes/layout_top.php';
 ?>
 
@@ -457,6 +548,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                     $isApproved = ($row['status'] ?? '') === 'approved';
                     $receiptPayload = null;
                     if ($department === 'sales') {
+                        $receiptItems = sales_order_receipt_items($row, $salesOrderItemsByOrder[$rowId] ?? []);
                         $receiptPayload = [
                             'order_code' => (string) ($row['order_code'] ?? '-'),
                             'receipt_no' => (string) ($row['receipt_no'] ?? '-'),
@@ -464,6 +556,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                             'beverage_name' => (string) ($row['beverage_name'] ?? '-'),
                             'quantity' => (float) ($row['quantity'] ?? 0),
                             'unit_price' => (float) ($row['unit_price'] ?? 0),
+                            'items' => $receiptItems,
                             'total_amount' => (float) ($row['total_amount'] ?? 0),
                             'payment_method' => (string) ($row['payment_method'] ?? '-'),
                             'payment_reference' => (string) ($row['payment_reference'] ?? ''),
@@ -999,6 +1092,18 @@ $purchaseWorkflowNote = $department === 'production'
                 $fieldName = $field['name'];
                 $fieldType = $field['type'];
                 $required = (bool) ($field['required'] ?? false);
+                if ($department === 'sales' && $fieldName === 'beverage_name') {
+                    ?>
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-semibold text-slate-700">Order Items *</label>
+                        <?php $renderSalesOrderItemsBuilder($recipeOptions, [], 'sales-create-items'); ?>
+                    </div>
+                    <?php
+                    continue;
+                }
+                if ($department === 'sales' && in_array($fieldName, ['quantity', 'unit_price'], true)) {
+                    continue;
+                }
                 $fieldClass = in_array($fieldType, ['textarea', 'inventory_multi_select'], true) ? 'md:col-span-2' : '';
                 ?>
                 <div class="<?= e($fieldClass) ?>">
@@ -1164,6 +1269,18 @@ $purchaseWorkflowNote = $department === 'production'
                 <?php endforeach; ?>
 
                 <?php if ($department === 'sales'): ?>
+                    <?php $salesViewItems = sales_order_receipt_items($row, $salesOrderItemsByOrder[$rowId] ?? []); ?>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Order Items</p>
+                        <div class="mt-2 space-y-1">
+                            <?php foreach ($salesViewItems as $salesViewItem): ?>
+                                <div class="flex items-center justify-between gap-3 text-sm">
+                                    <span class="font-semibold text-slate-800"><?= e((string) ($salesViewItem['beverage_name'] ?? '-')) ?></span>
+                                    <span class="whitespace-nowrap text-slate-600"><?= e((string) ((int) ($salesViewItem['quantity'] ?? 0))) ?> x <?= e(format_money((float) ($salesViewItem['unit_price'] ?? 0))) ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
                     <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         <p class="text-xs uppercase tracking-wide text-slate-500">Total Amount</p>
                         <p class="font-semibold text-slate-800"><?= e(format_money((float) ($row['total_amount'] ?? 0))) ?></p>
@@ -1213,6 +1330,19 @@ $purchaseWorkflowNote = $department === 'production'
                         $fieldType = $field['type'];
                         $required = (bool) ($field['required'] ?? false);
                         $value = $row[$fieldName] ?? '';
+                        if ($department === 'sales' && $fieldName === 'beverage_name') {
+                            $editSalesItems = sales_order_receipt_items($row, $salesOrderItemsByOrder[$rowId] ?? []);
+                            ?>
+                            <div class="md:col-span-2">
+                                <label class="block text-sm font-semibold text-slate-700">Order Items *</label>
+                                <?php $renderSalesOrderItemsBuilder($recipeOptions, $editSalesItems, 'sales-edit-items-' . $rowId); ?>
+                            </div>
+                            <?php
+                            continue;
+                        }
+                        if ($department === 'sales' && in_array($fieldName, ['quantity', 'unit_price'], true)) {
+                            continue;
+                        }
                         $fieldClass = in_array($fieldType, ['textarea', 'inventory_multi_select'], true) ? 'md:col-span-2' : '';
                         $selectedInventoryValues = [];
                         if ($fieldType === 'inventory_multi_select') {
@@ -1434,6 +1564,16 @@ $purchaseWorkflowNote = $department === 'production'
                 });
             };
 
+            const writeTextLine = function (value, bold) {
+                const lines = doc.splitTextToSize(value || '-', maxWidth);
+                doc.setFont('helvetica', bold ? 'bold' : 'normal');
+                doc.setFontSize(9);
+                lines.forEach(function (line) {
+                    doc.text(line, left, y);
+                    y += lineHeight;
+                });
+            };
+
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(12);
             doc.text('Don Macchiatos', left, y);
@@ -1449,8 +1589,23 @@ $purchaseWorkflowNote = $department === 'production'
             writeWrappedLine('Receipt No', payload.receipt_no || '-', true);
             writeWrappedLine('Order Code', payload.order_code || '-', false);
             writeWrappedLine('Customer', payload.customer_name || '-', false);
-            writeWrappedLine('Beverage', payload.beverage_name || '-', false);
-            writeWrappedLine('Qty x Unit Price', Number(payload.quantity || 0).toFixed(0) + ' x PHP ' + Number(payload.unit_price || 0).toFixed(2), false);
+            const receiptItems = Array.isArray(payload.items) && payload.items.length > 0
+                ? payload.items
+                : [{
+                    beverage_name: payload.beverage_name || '-',
+                    quantity: payload.quantity || 0,
+                    unit_price: payload.unit_price || 0,
+                    total_amount: payload.total_amount || 0
+                }];
+
+            writeTextLine('Items', true);
+            receiptItems.forEach(function (item) {
+                const itemName = item.beverage_name || '-';
+                const itemQuantity = Number(item.quantity || 0);
+                const itemUnitPrice = Number(item.unit_price || 0);
+                const itemTotal = Number(item.total_amount || (itemQuantity * itemUnitPrice));
+                writeTextLine(itemName + ' | ' + itemQuantity.toFixed(0) + ' x PHP ' + itemUnitPrice.toFixed(2) + ' = PHP ' + itemTotal.toFixed(2), false);
+            });
             writeWrappedLine('Payment Method', payload.payment_method || '-', false);
             if (payload.payment_reference) {
                 writeWrappedLine('Payment Ref', payload.payment_reference, false);
@@ -1473,6 +1628,138 @@ $purchaseWorkflowNote = $department === 'production'
             const filenameBase = (payload.receipt_no || payload.order_code || 'receipt').toString().replace(/\s+/g, '-');
             doc.save(filenameBase + '.pdf');
         }
+
+        (function () {
+            function formatMoney(value) {
+                return 'PHP ' + Number(value || 0).toFixed(2);
+            }
+
+            function updateSalesOrderBuilder(builder) {
+                const rows = Array.from(builder.querySelectorAll('[data-sales-item-row]'));
+                const previewBody = builder.querySelector('[data-sales-items-preview]');
+                const totalTarget = builder.querySelector('[data-sales-order-total]');
+                let totalAmount = 0;
+                const previewRows = [];
+
+                rows.forEach(function (row) {
+                    const flavorSelect = row.querySelector('[data-sales-item-name]');
+                    const quantityInput = row.querySelector('[data-sales-item-quantity]');
+                    const priceInput = row.querySelector('[data-sales-item-price]');
+                    const selectedOption = flavorSelect ? flavorSelect.options[flavorSelect.selectedIndex] : null;
+                    const flavorName = selectedOption && selectedOption.value ? selectedOption.textContent.trim() : '';
+                    const quantity = Number(quantityInput ? quantityInput.value : 0);
+                    const unitPrice = Number(priceInput ? priceInput.value : 0);
+                    const lineAmount = quantity > 0 && unitPrice > 0 ? quantity * unitPrice : 0;
+
+                    if (flavorName !== '' && lineAmount > 0) {
+                        totalAmount += lineAmount;
+                        previewRows.push({
+                            flavorName: flavorName,
+                            quantity: quantity,
+                            unitPrice: unitPrice,
+                            lineAmount: lineAmount
+                        });
+                    }
+                });
+
+                rows.forEach(function (row) {
+                    const removeButton = row.querySelector('[data-sales-remove-item]');
+                    if (!removeButton) {
+                        return;
+                    }
+
+                    removeButton.disabled = rows.length <= 1;
+                    removeButton.classList.toggle('cursor-not-allowed', rows.length <= 1);
+                    removeButton.classList.toggle('opacity-50', rows.length <= 1);
+                });
+
+                if (previewBody) {
+                    if (previewRows.length === 0) {
+                        previewBody.innerHTML = '<tr><td colspan="4" class="px-3 py-3 text-slate-500">No items selected.</td></tr>';
+                    } else {
+                        previewBody.innerHTML = previewRows.map(function (item) {
+                            return '<tr class="border-t border-slate-100">'
+                                + '<td class="px-3 py-2 font-semibold text-slate-800">' + item.flavorName.replace(/[&<>"']/g, function (char) {
+                                    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
+                                }) + '</td>'
+                                + '<td class="px-3 py-2 text-right">' + item.quantity.toFixed(0) + '</td>'
+                                + '<td class="px-3 py-2 text-right">' + formatMoney(item.unitPrice) + '</td>'
+                                + '<td class="px-3 py-2 text-right font-bold">' + formatMoney(item.lineAmount) + '</td>'
+                                + '</tr>';
+                        }).join('');
+                    }
+                }
+
+                if (totalTarget) {
+                    totalTarget.textContent = formatMoney(totalAmount);
+                }
+            }
+
+            function initializeSalesOrderBuilder(builder) {
+                if (!builder || builder.dataset.salesOrderBuilderBound === '1') {
+                    return;
+                }
+
+                builder.dataset.salesOrderBuilderBound = '1';
+                const list = builder.querySelector('[data-sales-items-list]');
+                const template = builder.querySelector('[data-sales-item-template]');
+                const addButton = builder.querySelector('[data-sales-add-item]');
+                builder.dataset.nextIndex = String(builder.querySelectorAll('[data-sales-item-row]').length);
+
+                if (addButton && list && template) {
+                    addButton.addEventListener('click', function () {
+                        const nextIndex = Number(builder.dataset.nextIndex || '0');
+                        const wrapper = document.createElement('div');
+                        wrapper.innerHTML = template.innerHTML.replace(/__INDEX__/g, String(nextIndex)).trim();
+                        const row = wrapper.firstElementChild;
+                        if (row) {
+                            list.appendChild(row);
+                            builder.dataset.nextIndex = String(nextIndex + 1);
+                            updateSalesOrderBuilder(builder);
+                        }
+                    });
+                }
+
+                builder.addEventListener('click', function (event) {
+                    const target = event.target instanceof Element ? event.target : null;
+                    if (!target) {
+                        return;
+                    }
+
+                    const removeButton = target.closest('[data-sales-remove-item]');
+                    if (!removeButton) {
+                        return;
+                    }
+
+                    const rows = builder.querySelectorAll('[data-sales-item-row]');
+                    if (rows.length <= 1) {
+                        return;
+                    }
+
+                    const row = removeButton.closest('[data-sales-item-row]');
+                    if (row) {
+                        row.remove();
+                        updateSalesOrderBuilder(builder);
+                    }
+                });
+
+                builder.addEventListener('input', function () {
+                    updateSalesOrderBuilder(builder);
+                });
+                builder.addEventListener('change', function () {
+                    updateSalesOrderBuilder(builder);
+                });
+
+                updateSalesOrderBuilder(builder);
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                document.querySelectorAll('[data-sales-order-builder]').forEach(initializeSalesOrderBuilder);
+            });
+            window.addEventListener('load', function () {
+                document.querySelectorAll('[data-sales-order-builder]').forEach(initializeSalesOrderBuilder);
+            });
+        })();
     </script>
 <?php endif; ?>
 
