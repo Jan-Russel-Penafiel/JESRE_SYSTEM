@@ -161,8 +161,16 @@ require_once __DIR__ . '/includes/layout_top.php';
                         <p class="font-semibold text-slate-800"><?= e(purchase_workflow_stage_label($record)) ?></p>
                     </div>
                     <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Received Quantity</p>
+                        <p class="font-semibold text-slate-800"><?= e(format_table_value('received_qty', $record['received_qty'] ?? null)) ?></p>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         <p class="text-xs uppercase tracking-wide text-slate-500">Purchasing Note</p>
                         <p class="font-semibold text-slate-800"><?= e((string) ($record['purchasing_note'] ?? '-')) ?></p>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Receiving Note</p>
+                        <p class="font-semibold text-slate-800"><?= e((string) ($record['receiving_note'] ?? '-')) ?></p>
                     </div>
                 <?php endif; ?>
 

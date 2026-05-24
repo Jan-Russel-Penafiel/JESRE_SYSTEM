@@ -23,6 +23,7 @@ function assert_same($expected, $actual, string $message): void
 assert_true(function_exists('purchase_workflow_stage'), 'purchase_workflow_stage() must be defined.');
 assert_true(function_exists('can_inventory_confirm_purchase_order'), 'can_inventory_confirm_purchase_order() must be defined.');
 assert_true(function_exists('can_purchasing_process_purchase_order'), 'can_purchasing_process_purchase_order() must be defined.');
+assert_true(function_exists('can_inventory_verify_received_purchase_order'), 'can_inventory_verify_received_purchase_order() must be defined.');
 assert_true(function_exists('can_general_manager_finalize_purchase_order'), 'can_general_manager_finalize_purchase_order() must be defined.');
 assert_true(function_exists('inventory_purchase_order_action_label'), 'inventory_purchase_order_action_label() must be defined.');
 assert_true(function_exists('purchasing_purchase_order_action_label'), 'purchasing_purchase_order_action_label() must be defined.');
@@ -36,6 +37,7 @@ $productionRequest = [
 assert_same('inventory_review', purchase_workflow_stage($productionRequest), 'Production purchase requests should wait for Inventory review.');
 assert_true(can_inventory_confirm_purchase_order($productionRequest), 'Inventory should be able to confirm unconfirmed pending purchase requests.');
 assert_true(!can_purchasing_process_purchase_order($productionRequest), 'Purchasing must not process requests before Inventory confirmation.');
+assert_true(!can_inventory_verify_received_purchase_order($productionRequest), 'Inventory must not verify receipt before Purchasing makes the order.');
 assert_true(!can_general_manager_finalize_purchase_order($productionRequest), 'GM must not finalize requests before Inventory and Purchasing stages.');
 assert_same('Confirm', inventory_purchase_order_action_label($productionRequest), 'Inventory should see a one-time Confirm action before forwarding.');
 assert_same(null, purchasing_purchase_order_action_label($productionRequest), 'Purchasing must not see an action before Inventory confirms.');
@@ -48,6 +50,7 @@ $inventoryConfirmed = [
 assert_same('purchasing_processing', purchase_workflow_stage($inventoryConfirmed), 'Inventory-confirmed purchase orders should wait for Purchasing processing.');
 assert_true(!can_inventory_confirm_purchase_order($inventoryConfirmed), 'Inventory should not confirm the same purchase order twice.');
 assert_true(can_purchasing_process_purchase_order($inventoryConfirmed), 'Purchasing should process Inventory-confirmed purchase orders.');
+assert_true(!can_inventory_verify_received_purchase_order($inventoryConfirmed), 'Inventory must not verify receipt before Purchasing makes the order.');
 assert_true(!can_general_manager_finalize_purchase_order($inventoryConfirmed), 'GM must not finalize before Purchasing processes the order.');
 assert_same(null, inventory_purchase_order_action_label($inventoryConfirmed), 'Inventory should not see Confirm after forwarding.');
 assert_same('Make Order', purchasing_purchase_order_action_label($inventoryConfirmed), 'Purchasing should see Make Order after Inventory confirmation.');
@@ -56,17 +59,31 @@ $purchasingProcessed = [
     'status' => 'pending',
     'inventory_confirmed_at' => '2026-05-10 09:00:00',
     'purchasing_processed_at' => '2026-05-10 10:00:00',
+    'received_verified_at' => null,
 ];
-assert_same('gm_review', purchase_workflow_stage($purchasingProcessed), 'Purchasing-processed purchase orders should wait for GM final approval.');
+assert_same('inventory_receiving', purchase_workflow_stage($purchasingProcessed), 'Purchasing-processed purchase orders should wait for Inventory receipt verification.');
 assert_true(!can_inventory_confirm_purchase_order($purchasingProcessed), 'Inventory should not confirm Purchasing-processed purchase orders.');
 assert_true(!can_purchasing_process_purchase_order($purchasingProcessed), 'Purchasing should not process the same purchase order twice.');
-assert_true(can_general_manager_finalize_purchase_order($purchasingProcessed), 'GM should finalize purchase orders after Inventory confirmation and Purchasing processing.');
+assert_true(can_inventory_verify_received_purchase_order($purchasingProcessed), 'Inventory should verify actual received quantity after Purchasing makes the order.');
+assert_true(!can_general_manager_finalize_purchase_order($purchasingProcessed), 'GM must not finalize before Inventory verifies received quantity.');
 assert_same(null, purchasing_purchase_order_action_label($purchasingProcessed), 'Purchasing should not see Make Order after processing.');
+assert_same('Verify Received', inventory_purchase_order_action_label($purchasingProcessed), 'Inventory should see Verify Received after Purchasing makes the order.');
+
+$receivedVerified = [
+    'status' => 'pending',
+    'inventory_confirmed_at' => '2026-05-10 09:00:00',
+    'purchasing_processed_at' => '2026-05-10 10:00:00',
+    'received_verified_at' => '2026-05-10 11:00:00',
+];
+assert_same('gm_review', purchase_workflow_stage($receivedVerified), 'Received purchase orders should wait for GM final approval.');
+assert_true(!can_inventory_verify_received_purchase_order($receivedVerified), 'Inventory should not verify the same receipt twice.');
+assert_true(can_general_manager_finalize_purchase_order($receivedVerified), 'GM should finalize purchase orders after received quantity verification.');
 
 $finalized = [
     'status' => 'approved',
     'inventory_confirmed_at' => '2026-05-10 09:00:00',
     'purchasing_processed_at' => '2026-05-10 10:00:00',
+    'received_verified_at' => '2026-05-10 11:00:00',
 ];
 assert_same('finalized', purchase_workflow_stage($finalized), 'GM-approved purchase orders should be finalized.');
 

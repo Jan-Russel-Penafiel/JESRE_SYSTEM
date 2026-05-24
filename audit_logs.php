@@ -7,7 +7,7 @@ require_general_manager();
 $pdo = db();
 
 $moduleOptions = ['all', 'purchasing', 'inventory', 'production', 'sales', 'accounting', 'crm', 'marketing', 'system'];
-$actionOptions = ['all', 'create', 'edit', 'delete', 'approved', 'rejected', 'confirm_purchase_order', 'process_purchase_order', 'system_create', 'system_update'];
+$actionOptions = ['all', 'create', 'edit', 'delete', 'approved', 'rejected', 'confirm_purchase_order', 'process_purchase_order', 'verify_purchase_receipt', 'system_create', 'system_update'];
 $sourceOptions = ['all', 'user', 'system'];
 
 $search = trim((string) ($_GET['q'] ?? ''));

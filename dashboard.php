@@ -155,7 +155,12 @@ if ($canAccessPurchasing) {
         COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_requests,
         COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected_requests,
         COALESCE(SUM(requested_qty), 0) AS total_requested_qty,
-        COALESCE(SUM(CASE WHEN status = 'approved' THEN estimated_total ELSE 0 END), 0) AS approved_estimated_total
+        COALESCE(SUM(CASE WHEN status = 'approved' THEN COALESCE(received_qty, requested_qty) ELSE 0 END), 0) AS approved_received_qty,
+        COALESCE(SUM(CASE
+            WHEN status = 'approved' AND quoted_unit_cost IS NOT NULL THEN quoted_unit_cost * COALESCE(received_qty, requested_qty)
+            WHEN status = 'approved' THEN estimated_total
+            ELSE 0
+        END), 0) AS approved_estimated_total
     FROM purchase_requests
     WHERE {$rangeWhere} AND inventory_confirmed_at IS NOT NULL")->fetch() ?: [];
 
@@ -165,14 +170,19 @@ if ($canAccessPurchasing) {
         'pending_requests' => (int) ($purchasingStatsRow['pending_requests'] ?? 0),
         'rejected_requests' => (int) ($purchasingStatsRow['rejected_requests'] ?? 0),
         'total_requested_qty' => (float) ($purchasingStatsRow['total_requested_qty'] ?? 0),
+        'approved_received_qty' => (float) ($purchasingStatsRow['approved_received_qty'] ?? 0),
         'approved_estimated_total' => (float) ($purchasingStatsRow['approved_estimated_total'] ?? 0),
     ];
 
     $purchasingIngredientRows = $pdo->query("SELECT
         COALESCE(i.item_name, CONCAT('Item #', pr.inventory_item_id)) AS ingredient_name,
         COALESCE(SUM(pr.requested_qty), 0) AS total_requested_qty,
-        COALESCE(SUM(CASE WHEN pr.status = 'approved' THEN pr.requested_qty ELSE 0 END), 0) AS approved_requested_qty,
-        COALESCE(SUM(CASE WHEN pr.status = 'approved' THEN pr.estimated_total ELSE 0 END), 0) AS approved_estimated_total
+        COALESCE(SUM(CASE WHEN pr.status = 'approved' THEN COALESCE(pr.received_qty, pr.requested_qty) ELSE 0 END), 0) AS approved_received_qty,
+        COALESCE(SUM(CASE
+            WHEN pr.status = 'approved' AND pr.quoted_unit_cost IS NOT NULL THEN pr.quoted_unit_cost * COALESCE(pr.received_qty, pr.requested_qty)
+            WHEN pr.status = 'approved' THEN pr.estimated_total
+            ELSE 0
+        END), 0) AS approved_estimated_total
     FROM purchase_requests pr
     LEFT JOIN inventory_items i ON i.id = pr.inventory_item_id
     WHERE {$purchasingRangeWhere} AND pr.inventory_confirmed_at IS NOT NULL
@@ -620,7 +630,7 @@ $gmDeptMeta = [
             <p class="mt-1 text-xl font-black text-brand-700"><?= e(number_format($purchasingStats['total_requested_qty'], 2)) ?></p>
         </div>
         <div class="rounded-xl border border-slate-200 bg-slate-100 p-3">
-            <p class="text-xs uppercase tracking-wide text-slate-600">Approved Total Cost</p>
+            <p class="text-xs uppercase tracking-wide text-slate-600">Approved Received Cost</p>
             <p class="mt-1 text-xl font-black text-slate-900"><?= e(format_money($purchasingStats['approved_estimated_total'])) ?></p>
         </div>
     </div>
@@ -649,7 +659,7 @@ $gmDeptMeta = [
                 <tr class="text-left text-slate-500">
                     <th class="pb-2 pr-4" data-priority="high">Ingredient</th>
                     <th class="pb-2 pr-4" data-priority="high">Requested Qty</th>
-                    <th class="pb-2 pr-4" data-priority="medium">Approved Qty</th>
+                    <th class="pb-2 pr-4" data-priority="medium">Approved Received Qty</th>
                     <th class="pb-2" data-priority="medium">Approved Spend</th>
                 </tr>
                 </thead>
@@ -659,7 +669,7 @@ $gmDeptMeta = [
                         <tr class="border-t border-slate-100">
                             <td class="py-2 pr-4 font-semibold"><?= e((string) ($ingredientRow['ingredient_name'] ?? '-')) ?></td>
                             <td class="py-2 pr-4"><?= e(number_format((float) ($ingredientRow['total_requested_qty'] ?? 0), 2)) ?></td>
-                            <td class="py-2 pr-4"><?= e(number_format((float) ($ingredientRow['approved_requested_qty'] ?? 0), 2)) ?></td>
+                            <td class="py-2 pr-4"><?= e(number_format((float) ($ingredientRow['approved_received_qty'] ?? 0), 2)) ?></td>
                             <td class="py-2"><?= e(format_money((float) ($ingredientRow['approved_estimated_total'] ?? 0))) ?></td>
                         </tr>
                     <?php endforeach; ?>
@@ -1477,7 +1487,7 @@ $gmDeptMeta = [
         <?= json_encode(array_column($purchasingIngredientRows, 'ingredient_name')) ?>,
         [
             { label: 'Requested Qty', data: <?= json_encode(array_map(fn($r) => (float)($r['total_requested_qty'] ?? 0), $purchasingIngredientRows)) ?>, backgroundColor: COLORS.brandLight, borderColor: COLORS.brand, borderWidth: 1.5 },
-            { label: 'Approved Qty',  data: <?= json_encode(array_map(fn($r) => (float)($r['approved_requested_qty'] ?? 0), $purchasingIngredientRows)) ?>, backgroundColor: COLORS.emeraldLight, borderColor: COLORS.emerald, borderWidth: 1.5 },
+            { label: 'Approved Received Qty',  data: <?= json_encode(array_map(fn($r) => (float)($r['approved_received_qty'] ?? 0), $purchasingIngredientRows)) ?>, backgroundColor: COLORS.emeraldLight, borderColor: COLORS.emerald, borderWidth: 1.5 },
         ],
         { horizontal: true }
     );

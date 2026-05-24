@@ -78,18 +78,21 @@ Manager review remains available as an oversight layer for pending non-POS recor
 
 - Purchasing Department
   - Review purchase orders confirmed by Inventory
-  - Process or reject purchase orders
-  - Processed purchase orders require General Manager final approval before restocking
+  - Process or reject purchase orders using unit cost
+  - Processed purchase orders return to Inventory for received quantity verification
+  - Verified purchase orders require General Manager final approval before restocking
 - Inventory Department
   - Real-time stock monitoring (live auto-refresh)
   - Determine low and high stock levels
   - Confirm generated purchase orders for Purchasing processing
+  - Verify actual received quantity before stock is added
 - Production Department
   - Receive Sales Order copies
   - Prepare orders and review inventory movement
   - Send purchase requests to Inventory when stock is low
 - Sales Department
   - Process customer orders directly in POS
+  - Record customer TIN on receipts when the customer needs expense documentation
   - Add multiple products or flavors to one customer transaction
   - Log daily production from the Sales Department
   - Select beverage recipe (flavor) and quantity
@@ -148,15 +151,16 @@ On Sales create/edit (POS validation):
 On Purchase workflow:
 - Production purchase requests are created as pending Inventory review and do not require General Manager approval.
 - Inventory confirmation marks the request as a purchase order and sends it to Purchasing.
-- Purchasing processing sends the order to the General Manager review queue.
-- General Manager final approval increases the linked inventory stock by `requested_qty`.
+- Purchasing processing sends the order back to Inventory for actual received quantity verification.
+- Inventory records the actual received quantity, so an order for 20 can be verified as 20 received or noted as a variance.
+- General Manager final approval increases the linked inventory stock by verified `received_qty`.
 - Accounting receives an approved purchase expense entry only after General Manager final approval.
 
 On Production approval:
 - Inventory is automatically deducted based on recipe ingredient quantities.
 
 Simple operational flow:
-- Sales -> Production -> Inventory -> Purchasing -> General Manager final purchase approval
+- Sales -> Production -> Inventory -> Purchasing -> Inventory receiving verification -> General Manager final purchase approval
 - Sales -> Accounting for expenses and financial records
 
 Inventory monitoring:
@@ -208,6 +212,7 @@ Inventory monitoring:
 - `reports.php` - Final consolidated reports
 - `handlers.php` - POST actions and approval automation
 - `scripts/2026_05_18_sales_order_items.sql` - Upgrade migration for multi-item sales receipts
+- `scripts/2026_05_24_purchase_receiving_customer_tin.sql` - Upgrade migration for purchase receiving verification and customer TIN
 - `includes/` - Reusable helpers, auth, DB, layout
 
 ## Setup Instructions (XAMPP)
@@ -222,6 +227,7 @@ Inventory monitoring:
 Upgrade note:
 - Existing databases must run `scripts/2026_05_10_purchase_workflow.sql` once to add the Inventory confirmation and Purchasing processing columns used by the updated purchase workflow.
 - Existing databases must run `scripts/2026_05_18_sales_order_items.sql` once to add sales order line items and backfill existing one-flavor sales.
+- Existing databases must run `scripts/2026_05_24_purchase_receiving_customer_tin.sql` once to add purchase receiving verification fields and customer TIN fields.
 
 If you are upgrading from a much earlier version, back up data first, then either run the listed upgrade scripts in order or recreate the database from `schema.sql`.
 

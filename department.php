@@ -356,12 +356,23 @@ if (in_array($department, ['production', 'inventory'], true)) {
 }
 
 $inventoryPurchaseOrderRows = [];
+$inventoryReceivingOrderRows = [];
 if ($isInventoryDepartment) {
     $inventoryPurchaseOrderRows = $pdo->query("SELECT pr.*, i.item_name, i.unit, i.stock_qty, i.reorder_level
         FROM purchase_requests pr
         LEFT JOIN inventory_items i ON i.id = pr.inventory_item_id
         WHERE pr.status = 'pending' AND pr.inventory_confirmed_at IS NULL
         ORDER BY pr.updated_at DESC, pr.id DESC
+        LIMIT 20")->fetchAll() ?: [];
+
+    $inventoryReceivingOrderRows = $pdo->query("SELECT pr.*, i.item_name, i.unit, i.stock_qty, i.reorder_level
+        FROM purchase_requests pr
+        LEFT JOIN inventory_items i ON i.id = pr.inventory_item_id
+        WHERE pr.status = 'pending'
+            AND pr.inventory_confirmed_at IS NOT NULL
+            AND pr.purchasing_processed_at IS NOT NULL
+            AND pr.received_verified_at IS NULL
+        ORDER BY pr.purchasing_processed_at DESC, pr.id DESC
         LIMIT 20")->fetchAll() ?: [];
 }
 
@@ -553,6 +564,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                             'order_code' => (string) ($row['order_code'] ?? '-'),
                             'receipt_no' => (string) ($row['receipt_no'] ?? '-'),
                             'customer_name' => (string) ($row['customer_name'] ?? '-'),
+                            'customer_tin' => (string) ($row['customer_tin'] ?? ''),
                             'beverage_name' => (string) ($row['beverage_name'] ?? '-'),
                             'quantity' => (float) ($row['quantity'] ?? 0),
                             'unit_price' => (float) ($row['unit_price'] ?? 0),
@@ -790,7 +802,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                 </div>
 
                 <div>
-                    <label class="block text-sm font-semibold text-slate-700">Total Cost</label>
+                    <label class="block text-sm font-semibold text-slate-700">Unit Cost</label>
                     <input type="number" name="quoted_unit_cost" step="0.01" min="0" value="<?= e((string) ($purchaseOrderRow['quoted_unit_cost'] ?? '')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
                 </div>
 
@@ -806,6 +818,50 @@ require_once __DIR__ . '/includes/layout_top.php';
 
                 <div class="md:col-span-2 flex justify-end">
                     <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Confirm</button>
+                </div>
+            </form>
+        </div>
+    </div>
+<?php endforeach; ?>
+<?php foreach ($inventoryReceivingOrderRows as $receivingOrderRow): ?>
+    <?php
+    $receivingOrderRowId = (int) ($receivingOrderRow['id'] ?? 0);
+    $orderedQty = (float) ($receivingOrderRow['requested_qty'] ?? 0);
+    ?>
+    <div id="verify-receipt-<?= e((string) $receivingOrderRowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'verify-receipt-<?= e((string) $receivingOrderRowId) ?>')">
+        <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h4 class="text-lg font-extrabold text-slate-900">Verify Received #<?= e((string) $receivingOrderRowId) ?></h4>
+                    <p class="mt-0.5 text-xs text-slate-500">Ordered <?= e(number_format($orderedQty, 2)) ?> <?= e((string) ($receivingOrderRow['unit'] ?? '')) ?>. Enter what Inventory actually received.</p>
+                </div>
+                <button type="button" onclick="closeModal('verify-receipt-<?= e((string) $receivingOrderRowId) ?>')" class="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-700">Close</button>
+            </div>
+
+            <form method="post" action="handlers.php" class="mt-4 space-y-3" data-disable-on-submit>
+                <?= csrf_input() ?>
+                <input type="hidden" name="action" value="inventory_verify_purchase_receipt">
+                <input type="hidden" name="dept" value="purchasing">
+                <input type="hidden" name="redirect_dept" value="inventory">
+                <input type="hidden" name="id" value="<?= e((string) $receivingOrderRowId) ?>">
+
+                <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    <p class="text-xs uppercase tracking-wide text-slate-500">Item</p>
+                    <p class="font-semibold text-slate-800"><?= e((string) ($receivingOrderRow['item_name'] ?? ('Item #' . (int) ($receivingOrderRow['inventory_item_id'] ?? 0)))) ?></p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Received Quantity *</label>
+                    <input type="number" name="received_qty" step="0.01" min="0.01" value="<?= e((string) ($receivingOrderRow['received_qty'] ?? $receivingOrderRow['requested_qty'] ?? '')) ?>" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" required>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700">Receiving Note</label>
+                    <textarea name="receiving_note" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100" placeholder="Required if received quantity is different from ordered quantity."><?= e((string) ($receivingOrderRow['receiving_note'] ?? '')) ?></textarea>
+                </div>
+
+                <div class="flex justify-end">
+                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800">Verify Received</button>
                 </div>
             </form>
         </div>
@@ -857,7 +913,8 @@ require_once __DIR__ . '/includes/layout_top.php';
                     <th class="pb-2 pr-3" data-priority="high">Item</th>
                     <th class="pb-2 pr-3 text-right" data-priority="medium">Qty</th>
                     <th class="pb-2 pr-3" data-priority="medium">Supplier</th>
-                    <th class="pb-2 pr-3 text-right" data-priority="medium">Cost</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Unit Cost</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Est. Total</th>
                     <th class="pb-2 text-right" data-priority="high">Action</th>
                 </tr>
                 </thead>
@@ -870,6 +927,7 @@ require_once __DIR__ . '/includes/layout_top.php';
                             <td class="py-2 pr-3"><?= e((string) ($purchaseOrderRow['item_name'] ?? ('Item #' . (int) ($purchaseOrderRow['inventory_item_id'] ?? 0)))) ?></td>
                             <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($purchaseOrderRow['requested_qty'] ?? 0), 2)) ?> <?= e((string) ($purchaseOrderRow['unit'] ?? '')) ?></td>
                             <td class="py-2 pr-3"><?= e((string) ($purchaseOrderRow['supplier_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($purchaseOrderRow['quoted_unit_cost'] ?? 0))) ?></td>
                             <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($purchaseOrderRow['estimated_total'] ?? 0))) ?></td>
                             <td class="py-2 text-right">
                                 <?php $inventoryActionLabel = inventory_purchase_order_action_label($purchaseOrderRow); ?>
@@ -896,7 +954,47 @@ require_once __DIR__ . '/includes/layout_top.php';
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <tr><td colspan="6" class="py-3 text-slate-500">No purchase requests awaiting Inventory confirmation.</td></tr>
+                    <tr><td colspan="7" class="py-3 text-slate-500">No purchase requests awaiting Inventory confirmation.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-6">
+        <h4 class="text-sm font-extrabold text-slate-900">Purchase Orders for Receiving Verification</h4>
+        <p class="mt-1 text-xs text-slate-500">Inventory verifies the actual quantity received before General Manager final approval adds stock.</p>
+        <div class="table-scroll mt-3">
+            <table class="stack-table w-full min-w-[760px] text-sm">
+                <thead>
+                <tr class="text-left text-slate-500">
+                    <th class="pb-2 pr-3" data-priority="high">Code</th>
+                    <th class="pb-2 pr-3" data-priority="high">Item</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Ordered</th>
+                    <th class="pb-2 pr-3" data-priority="medium">Supplier</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Unit Cost</th>
+                    <th class="pb-2 pr-3 text-right" data-priority="medium">Est. Total</th>
+                    <th class="pb-2 text-right" data-priority="high">Action</th>
+                </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                <?php if ($inventoryReceivingOrderRows): ?>
+                    <?php foreach ($inventoryReceivingOrderRows as $receivingOrderRow): ?>
+                        <?php $receivingOrderRowId = (int) ($receivingOrderRow['id'] ?? 0); ?>
+                        <tr class="border-t border-slate-100">
+                            <td class="py-2 pr-3 font-semibold"><?= e((string) ($receivingOrderRow['request_code'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3"><?= e((string) ($receivingOrderRow['item_name'] ?? ('Item #' . (int) ($receivingOrderRow['inventory_item_id'] ?? 0)))) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(number_format((float) ($receivingOrderRow['requested_qty'] ?? 0), 2)) ?> <?= e((string) ($receivingOrderRow['unit'] ?? '')) ?></td>
+                            <td class="py-2 pr-3"><?= e((string) ($receivingOrderRow['supplier_name'] ?? '-')) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($receivingOrderRow['quoted_unit_cost'] ?? 0))) ?></td>
+                            <td class="py-2 pr-3 text-right"><?= e(format_money((float) ($receivingOrderRow['estimated_total'] ?? 0))) ?></td>
+                            <td class="py-2 text-right">
+                                <button type="button" onclick="openModal('verify-receipt-<?= e((string) $receivingOrderRowId) ?>')" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100">Verify Received</button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr><td colspan="7" class="py-3 text-slate-500">No purchase orders awaiting received quantity verification.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -1052,7 +1150,7 @@ $purchaseWorkflowNote = $department === 'production'
             </div>
 
             <div>
-                <label class="block text-sm font-semibold text-slate-700">Total Cost</label>
+                <label class="block text-sm font-semibold text-slate-700">Unit Cost</label>
                 <input type="number" name="quoted_unit_cost" step="0.01" min="0" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100">
             </div>
 
@@ -1298,6 +1396,17 @@ $purchaseWorkflowNote = $department === 'production'
                     </div>
                 <?php endif; ?>
 
+                <?php if ($department === 'purchasing'): ?>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Received Quantity</p>
+                        <p class="font-semibold text-slate-800"><?= e(format_table_value('received_qty', $row['received_qty'] ?? null)) ?></p>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p class="text-xs uppercase tracking-wide text-slate-500">Receiving Note</p>
+                        <p class="font-semibold text-slate-800"><?= e((string) ($row['receiving_note'] ?? '-')) ?></p>
+                    </div>
+                <?php endif; ?>
+
                 <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                     <p class="text-xs uppercase tracking-wide text-slate-500">Status</p>
                     <p class="font-semibold text-slate-800"><?= e(strtoupper((string) ($row['status'] ?? 'pending'))) ?></p>
@@ -1505,7 +1614,7 @@ $purchaseWorkflowNote = $department === 'production'
         <div id="approve-purchase-order-<?= e((string) $rowId) ?>" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/60 p-4" onclick="closeOnBackdrop(event, 'approve-purchase-order-<?= e((string) $rowId) ?>')">
             <div class="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
                 <h4 class="text-lg font-extrabold text-slate-900">Make Order #<?= e((string) $rowId) ?></h4>
-                <p class="mt-2 text-sm text-slate-600">Making this order sends it to the General Manager for final purchase approval.</p>
+                <p class="mt-2 text-sm text-slate-600">Making this order sends it to Inventory for received quantity verification.</p>
 
                 <form method="post" action="handlers.php" class="mt-4 space-y-3" data-disable-on-submit>
                     <?= csrf_input() ?>
@@ -1589,6 +1698,9 @@ $purchaseWorkflowNote = $department === 'production'
             writeWrappedLine('Receipt No', payload.receipt_no || '-', true);
             writeWrappedLine('Order Code', payload.order_code || '-', false);
             writeWrappedLine('Customer', payload.customer_name || '-', false);
+            if (payload.customer_tin) {
+                writeWrappedLine('Customer TIN', payload.customer_tin, false);
+            }
             const receiptItems = Array.isArray(payload.items) && payload.items.length > 0
                 ? payload.items
                 : [{

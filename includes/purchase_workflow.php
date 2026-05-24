@@ -20,6 +20,10 @@ function purchase_workflow_stage(array $record): string
         return 'purchasing_processing';
     }
 
+    if (empty($record['received_verified_at'])) {
+        return 'inventory_receiving';
+    }
+
     return 'gm_review';
 }
 
@@ -30,6 +34,7 @@ function purchase_workflow_stage_label(array $record): string
     $labels = [
         'inventory_review' => 'Inventory Review',
         'purchasing_processing' => 'Purchasing Make Order',
+        'inventory_receiving' => 'Inventory Receive Check',
         'gm_review' => 'GM Final Approval',
         'finalized' => 'Finalized',
         'rejected' => 'Rejected',
@@ -48,6 +53,11 @@ function can_purchasing_process_purchase_order(array $record): bool
     return purchase_workflow_stage($record) === 'purchasing_processing';
 }
 
+function can_inventory_verify_received_purchase_order(array $record): bool
+{
+    return purchase_workflow_stage($record) === 'inventory_receiving';
+}
+
 function can_general_manager_finalize_purchase_order(array $record): bool
 {
     return purchase_workflow_stage($record) === 'gm_review';
@@ -55,7 +65,15 @@ function can_general_manager_finalize_purchase_order(array $record): bool
 
 function inventory_purchase_order_action_label(array $record): ?string
 {
-    return can_inventory_confirm_purchase_order($record) ? 'Confirm' : null;
+    if (can_inventory_confirm_purchase_order($record)) {
+        return 'Confirm';
+    }
+
+    if (can_inventory_verify_received_purchase_order($record)) {
+        return 'Verify Received';
+    }
+
+    return null;
 }
 
 function purchasing_purchase_order_action_label(array $record): ?string

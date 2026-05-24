@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
     purchasing_processed_by INT UNSIGNED NULL,
     purchasing_processed_at DATETIME NULL,
     purchasing_note TEXT NULL,
+    received_qty DECIMAL(12,2) NULL,
+    received_verified_by INT UNSIGNED NULL,
+    received_verified_at DATETIME NULL,
+    receiving_note TEXT NULL,
     status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
     submitted_by INT UNSIGNED NULL,
     approved_by INT UNSIGNED NULL,
@@ -89,10 +93,12 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
     INDEX idx_purchase_status (status),
     INDEX idx_purchase_inventory_confirmed (inventory_confirmed_at),
     INDEX idx_purchase_purchasing_processed (purchasing_processed_at),
+    INDEX idx_purchase_received_verified (received_verified_at),
     INDEX idx_purchase_inventory (inventory_item_id),
     CONSTRAINT fk_purchase_inventory_item FOREIGN KEY (inventory_item_id) REFERENCES inventory_items (id) ON DELETE RESTRICT,
     CONSTRAINT fk_purchase_inventory_confirmed_by FOREIGN KEY (inventory_confirmed_by) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_purchase_purchasing_processed_by FOREIGN KEY (purchasing_processed_by) REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT fk_purchase_received_verified_by FOREIGN KEY (received_verified_by) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_purchase_submitted_by FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_purchase_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -122,6 +128,7 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     order_code VARCHAR(40) NOT NULL UNIQUE,
     customer_name VARCHAR(120) NOT NULL,
+    customer_tin VARCHAR(30) NULL,
     beverage_name VARCHAR(120) NOT NULL,
     quantity INT UNSIGNED NOT NULL,
     unit_price DECIMAL(12,2) NOT NULL,
@@ -146,6 +153,7 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_sales_status (status),
     INDEX idx_sales_date (created_at),
+    INDEX idx_sales_customer_tin (customer_tin),
     CONSTRAINT fk_sales_inventory_item FOREIGN KEY (inventory_item_id) REFERENCES inventory_items (id) ON DELETE SET NULL,
     CONSTRAINT fk_sales_submitted_by FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_sales_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL
@@ -190,6 +198,7 @@ CREATE TABLE IF NOT EXISTS accounting_entries (
 CREATE TABLE IF NOT EXISTS crm_profiles (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     customer_name VARCHAR(120) NOT NULL,
+    customer_tin VARCHAR(30) NULL,
     contact_no VARCHAR(60) NULL,
     preferences TEXT NULL,
     last_purchase_at DATETIME NULL,
@@ -203,6 +212,7 @@ CREATE TABLE IF NOT EXISTS crm_profiles (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_crm_customer_name (customer_name),
+    INDEX idx_crm_customer_tin (customer_tin),
     INDEX idx_crm_status (status),
     CONSTRAINT fk_crm_submitted_by FOREIGN KEY (submitted_by) REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_crm_approved_by FOREIGN KEY (approved_by) REFERENCES users (id) ON DELETE SET NULL

@@ -43,6 +43,23 @@ $validationConfigForDepartment = static function (array $config, string $dept): 
     return $config;
 };
 
+$normalizeCustomerTin = static function ($value): ?string {
+    $tin = trim((string) ($value ?? ''));
+    if ($tin === '') {
+        return null;
+    }
+
+    if (strlen($tin) > 30) {
+        throw new RuntimeException('Customer TIN must be 30 characters or less.');
+    }
+
+    if (!preg_match('/^[0-9\-\s]+$/', $tin)) {
+        throw new RuntimeException('Customer TIN may contain numbers, spaces, and hyphens only.');
+    }
+
+    return preg_replace('/\s+/', ' ', $tin) ?: null;
+};
+
 $canCreateDepartmentRecord = static function (array $currentUser, string $dept): bool {
     if (can_user_access_department($currentUser, $dept)) {
         return true;
@@ -675,9 +692,14 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
     if ($dept === 'purchasing') {
         $inventoryItemId = (int) ($record['inventory_item_id'] ?? 0);
         $requestedQty = (float) ($record['requested_qty'] ?? 0);
+        $receivedQty = (float) ($record['received_qty'] ?? 0);
 
         if ($inventoryItemId <= 0 || $requestedQty <= 0) {
             throw new RuntimeException('Purchase request must include a valid inventory item and requested quantity.');
+        }
+
+        if ($receivedQty <= 0 || empty($record['received_verified_at'])) {
+            throw new RuntimeException('Inventory must verify the received quantity before purchase restocking.');
         }
 
         $inventoryStmt = $db->prepare('SELECT * FROM inventory_items WHERE id = ? FOR UPDATE');
@@ -693,7 +715,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
 
         $oldInventory = $inventory;
         $updateInventory = $db->prepare('UPDATE inventory_items SET stock_qty = stock_qty + ?, updated_at = NOW() WHERE id = ?');
-        $updateInventory->execute([$requestedQty, $inventoryItemId]);
+        $updateInventory->execute([$receivedQty, $inventoryItemId]);
 
         $updatedInventory = $fetchRecord($db, 'inventory_items', $inventoryItemId, false);
         write_audit_log(
@@ -705,7 +727,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
             $oldInventory,
             $updatedInventory,
             $approverId,
-            'Auto-restocked inventory from approved purchase request #' . (int) ($record['id'] ?? 0) . '.',
+            'Auto-restocked inventory from approved purchase request #' . (int) ($record['id'] ?? 0) . ' using verified received quantity.',
             'system'
         );
 
@@ -714,9 +736,10 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
             $requestCode = 'PR#' . (int) ($record['id'] ?? 0);
         }
 
-        $expenseAmount = (float) ($record['estimated_total'] ?? 0);
+        $unitCost = (float) ($record['quoted_unit_cost'] ?? 0);
+        $expenseAmount = $unitCost > 0 ? round($unitCost * $receivedQty, 2) : 0.0;
         if ($expenseAmount <= 0) {
-            $expenseAmount = (float) ($record['quoted_unit_cost'] ?? 0);
+            $expenseAmount = (float) ($record['estimated_total'] ?? 0);
         }
 
         $insertAccounting = $db->prepare("INSERT INTO accounting_entries
@@ -725,7 +748,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
         $insertAccounting->execute([
             'Purchase ' . $requestCode,
             $expenseAmount,
-            'Auto-generated from purchasing approval flow.',
+            'Auto-generated from purchasing approval flow. Ordered ' . number_format($requestedQty, 2) . ', received ' . number_format($receivedQty, 2) . '.',
             $record['submitted_by'] ?? null,
             $approverId,
         ]);
@@ -851,7 +874,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
                 continue;
             }
             $latestPurchase = $db->prepare(
-                "SELECT quoted_unit_cost, requested_qty FROM purchase_requests
+                "SELECT quoted_unit_cost FROM purchase_requests
                  WHERE inventory_item_id = ? AND status = 'approved' AND quoted_unit_cost IS NOT NULL AND requested_qty > 0
                  ORDER BY approved_at DESC LIMIT 1"
             );
@@ -860,7 +883,7 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
             if (!$purchaseRow) {
                 continue;
             }
-            $unitCost = (float) $purchaseRow['quoted_unit_cost'] / (float) $purchaseRow['requested_qty'];
+            $unitCost = (float) $purchaseRow['quoted_unit_cost'];
             $qtyUsed = (float) ($cogsItem['required_qty'] ?? 0) * $itemQuantity;
             $cogsTotal += $unitCost * $qtyUsed;
         }
@@ -899,6 +922,8 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
     if ($customerName === '') {
         return;
     }
+    $customerTin = trim((string) ($record['customer_tin'] ?? ''));
+    $customerTin = $customerTin !== '' ? $customerTin : null;
 
     $crmSelect = $db->prepare('SELECT * FROM crm_profiles WHERE customer_name = ? LIMIT 1 FOR UPDATE');
     $crmSelect->execute([$customerName]);
@@ -912,13 +937,14 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
             SET purchase_count = purchase_count + 1,
                 total_spent = total_spent + ?,
                 last_purchase_at = NOW(),
+                customer_tin = COALESCE(?, customer_tin),
                 status = 'approved',
                 approved_by = ?,
                 approval_note = 'Auto-updated from approved sales order.',
                 approved_at = NOW(),
                 updated_at = NOW()
             WHERE id = ?");
-        $updateProfile->execute([$totalAmount, $approverId, $profileId]);
+        $updateProfile->execute([$totalAmount, $customerTin, $approverId, $profileId]);
 
         $updatedProfile = $fetchRecord($db, 'crm_profiles', $profileId, false);
         write_audit_log(
@@ -935,9 +961,9 @@ $applyApprovalAutomation = static function (PDO $db, string $dept, array $record
         );
     } else {
         $insertProfile = $db->prepare("INSERT INTO crm_profiles
-            (customer_name, contact_no, preferences, last_purchase_at, purchase_count, total_spent, status, submitted_by, approved_by, approval_note, approved_at)
-            VALUES (?, NULL, NULL, NOW(), 1, ?, 'approved', ?, ?, 'Auto-created from approved sales order.', NOW())");
-        $insertProfile->execute([$customerName, $totalAmount, $record['submitted_by'] ?? null, $approverId]);
+            (customer_name, customer_tin, contact_no, preferences, last_purchase_at, purchase_count, total_spent, status, submitted_by, approved_by, approval_note, approved_at)
+            VALUES (?, ?, NULL, NULL, NOW(), 1, ?, 'approved', ?, ?, 'Auto-created from approved sales order.', NOW())");
+        $insertProfile->execute([$customerName, $customerTin, $totalAmount, $record['submitted_by'] ?? null, $approverId]);
         $profileId = (int) $db->lastInsertId();
 
         $newProfile = $fetchRecord($db, 'crm_profiles', $profileId, false);
@@ -1070,6 +1096,10 @@ try {
             $data['receipt_no'] = next_receipt_code($pdo);
             $data['paid_at'] = date('Y-m-d H:i:s');
             $data['total_amount'] = (float) ($salesTotals['total_amount'] ?? 0);
+        }
+
+        if (in_array($department, ['sales', 'crm'], true)) {
+            $data['customer_tin'] = $normalizeCustomerTin($data['customer_tin'] ?? null);
         }
 
         $table = $config['table'];
@@ -1285,6 +1315,10 @@ try {
             $data['total_amount'] = (float) ($salesTotals['total_amount'] ?? 0);
         }
 
+        if (in_array($department, ['sales', 'crm'], true)) {
+            $data['customer_tin'] = $normalizeCustomerTin($data['customer_tin'] ?? null);
+        }
+
         if ($department === 'production') {
             $ensureRecipeIngredientAvailability(
                 $pdo,
@@ -1493,6 +1527,10 @@ try {
                 purchasing_processed_by = NULL,
                 purchasing_processed_at = NULL,
                 purchasing_note = NULL,
+                received_qty = NULL,
+                received_verified_by = NULL,
+                received_verified_at = NULL,
+                receiving_note = NULL,
                 approved_by = NULL,
                 approval_note = NULL,
                 approved_at = NULL,
@@ -1595,7 +1633,7 @@ try {
             $approvalNote !== ''
                 ? $approvalNote
                 : ($decision === 'processed'
-                    ? 'Purchase order made by Purchasing Department and sent to General Manager for final approval.'
+                    ? 'Purchase order made by Purchasing Department and sent to Inventory for received quantity verification.'
                     : 'Purchase order rejected by Purchasing Department.'),
             'user'
         );
@@ -1610,10 +1648,90 @@ try {
         set_flash(
             'success',
             $decision === 'processed'
-                ? 'Purchase order #' . $id . ' made and sent to General Manager for final approval.'
+                ? 'Purchase order #' . $id . ' made and sent to Inventory for received quantity verification.'
                 : 'Purchase order #' . $id . ' has been rejected.'
         );
         $redirectToDepartment('purchasing');
+    }
+
+    if ($action === 'inventory_verify_purchase_receipt') {
+        if (!can_user_access_department($user ?? [], 'inventory')) {
+            throw new RuntimeException('Unauthorized department access.');
+        }
+
+        $config = $requireConfig('purchasing');
+        $table = $config['table'];
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            throw new RuntimeException('Invalid purchase order ID.');
+        }
+
+        $receivedQtyRaw = trim((string) ($_POST['received_qty'] ?? ''));
+        if ($receivedQtyRaw === '' || !is_numeric($receivedQtyRaw)) {
+            throw new RuntimeException('Received quantity must be a valid number.');
+        }
+
+        $receivedQty = round((float) $receivedQtyRaw, 2);
+        if ($receivedQty <= 0) {
+            throw new RuntimeException('Received quantity must be greater than zero.');
+        }
+
+        $receivingNote = trim((string) ($_POST['receiving_note'] ?? ''));
+        if (strlen($receivingNote) > 2000) {
+            throw new RuntimeException('Receiving note must be 2000 characters or less.');
+        }
+
+        $pdo->beginTransaction();
+
+        $record = $fetchRecord($pdo, $table, $id, true);
+        if (!$record) {
+            throw new RuntimeException('Purchase order not found.');
+        }
+
+        if (!can_inventory_verify_received_purchase_order($record)) {
+            throw new RuntimeException('Only purchase orders made by Purchasing can be verified as received by Inventory.');
+        }
+
+        $orderedQty = (float) ($record['requested_qty'] ?? 0);
+        if (abs($receivedQty - $orderedQty) > 0.0001 && $receivingNote === '') {
+            throw new RuntimeException('Receiving note is required when received quantity differs from ordered quantity.');
+        }
+
+        $update = $pdo->prepare("UPDATE {$table}
+            SET received_qty = ?,
+                received_verified_by = ?,
+                received_verified_at = NOW(),
+                receiving_note = ?,
+                approved_by = NULL,
+                approval_note = NULL,
+                approved_at = NULL,
+                updated_at = NOW()
+            WHERE id = ?");
+        $update->execute([
+            $receivedQty,
+            (int) ($user['id'] ?? 0),
+            $receivingNote !== '' ? $receivingNote : null,
+            $id,
+        ]);
+
+        $updatedRecord = $fetchRecord($pdo, $table, $id, false);
+        write_audit_log(
+            $pdo,
+            'inventory',
+            $table,
+            $id,
+            'verify_purchase_receipt',
+            $record,
+            $updatedRecord,
+            (int) ($user['id'] ?? 0),
+            'Inventory Department verified received quantity for purchase order #' . $id . '.',
+            'user'
+        );
+
+        $pdo->commit();
+
+        set_flash('success', 'Received quantity for purchase order #' . $id . ' verified and sent to General Manager for final approval.');
+        $redirectToDepartment('inventory');
     }
 
     if ($action === 'approve_record' || $action === 'reject_record') {
@@ -1642,7 +1760,7 @@ try {
         }
 
         if ($department === 'purchasing' && !can_general_manager_finalize_purchase_order($record)) {
-            throw new RuntimeException('Purchase order must be confirmed by Inventory and made by Purchasing before General Manager final approval.');
+            throw new RuntimeException('Purchase order must be confirmed by Inventory, made by Purchasing, and verified as received by Inventory before General Manager final approval.');
         }
 
         if ($decision === 'approved') {

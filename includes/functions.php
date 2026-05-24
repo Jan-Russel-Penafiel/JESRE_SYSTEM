@@ -355,11 +355,11 @@ function format_table_value(string $column, $value): string
         return '-';
     }
 
-    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'per_cup_qty', 'per_straw_qty', 'amount', 'total_amount', 'total_spent', 'requested_qty', 'quoted_unit_cost', 'estimated_total'], true)) {
+    if (in_array($column, ['stock_qty', 'reorder_level', 'ingredient_used_qty', 'unit_price', 'stock_deduct_qty', 'per_cup_qty', 'per_straw_qty', 'amount', 'total_amount', 'total_spent', 'requested_qty', 'received_qty', 'quoted_unit_cost', 'estimated_total'], true)) {
         return number_format((float) $value, 2);
     }
 
-    if (in_array($column, ['created_at', 'updated_at', 'approved_at', 'last_purchase_at', 'paid_at'], true)) {
+    if (in_array($column, ['created_at', 'updated_at', 'approved_at', 'last_purchase_at', 'paid_at', 'received_verified_at'], true)) {
         $timestamp = strtotime((string) $value);
 
         return $timestamp ? date('M d, Y h:i A', $timestamp) : (string) $value;

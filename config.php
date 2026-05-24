@@ -40,14 +40,15 @@ $DEPARTMENT_CONFIG = [
     'purchasing' => [
         'table' => 'purchase_requests',
         'title' => 'Purchasing Department',
-        'description' => 'Make purchase orders confirmed by Inventory, then route them to the General Manager for final purchase approval.',
+        'description' => 'Make purchase orders confirmed by Inventory, then route received quantities back to Inventory verification before final approval.',
         'create_button_label' => 'New Purchase Order',
         'submit_label' => 'Save Purchase Order',
         'edit_label' => 'Save Changes',
         'workflow_points' => [
             'Receive purchase orders confirmed by Inventory.',
-            'Make supplier purchase orders for low-stock ingredients and supplies.',
-            'General Manager final approval restocks linked inventory items and records the expense.',
+            'Make supplier purchase orders for low-stock ingredients and supplies using unit cost.',
+            'Inventory verifies the actual quantity received before General Manager final approval.',
+            'General Manager final approval restocks linked inventory items from the verified received quantity and records the expense.',
         ],
         'primary_label' => 'request_code',
         'fields' => [
@@ -55,7 +56,7 @@ $DEPARTMENT_CONFIG = [
             ['name' => 'inventory_item_id', 'label' => 'Item to Purchase', 'type' => 'inventory_select', 'required' => true],
             ['name' => 'requested_qty', 'label' => 'Order Quantity', 'type' => 'number', 'step' => '0.01', 'required' => true],
             ['name' => 'supplier_name', 'label' => 'Supplier Name', 'type' => 'text', 'required' => false],
-            ['name' => 'quoted_unit_cost', 'label' => 'Total Cost', 'type' => 'number', 'step' => '0.01', 'required' => false],
+            ['name' => 'quoted_unit_cost', 'label' => 'Unit Cost', 'type' => 'number', 'step' => '0.01', 'required' => false],
             ['name' => 'expected_delivery_date', 'label' => 'Expected Delivery Date', 'type' => 'date', 'required' => false],
             ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea', 'required' => false],
         ],
@@ -64,7 +65,9 @@ $DEPARTMENT_CONFIG = [
             'Item' => 'inventory_item_id',
             'Order Qty' => 'requested_qty',
             'Supplier' => 'supplier_name',
-            'Total Cost' => 'estimated_total',
+            'Unit Cost' => 'quoted_unit_cost',
+            'Est. Total' => 'estimated_total',
+            'Received Qty' => 'received_qty',
             'Workflow Stage' => 'purchase_workflow_stage',
             'Status' => 'status',
             'Updated' => 'updated_at',
@@ -73,7 +76,7 @@ $DEPARTMENT_CONFIG = [
     'inventory' => [
         'table' => 'inventory_items',
         'title' => 'Inventory Department',
-        'description' => 'Monitor stock levels, receive Production purchase requests, and confirm generated purchase orders for Purchasing.',
+        'description' => 'Monitor stock levels, receive Production purchase requests, confirm purchase orders for Purchasing, and verify actual received quantities.',
         'create_button_label' => 'Prepare Purchase Order',
         'submit_label' => 'Save Inventory Entry',
         'edit_label' => 'Save Changes',
@@ -81,6 +84,7 @@ $DEPARTMENT_CONFIG = [
             'Record and monitor inventory levels after Production prepares orders.',
             'Determine low and high stock levels from live inventory quantities.',
             'Confirm generated purchase orders for Purchasing when stock is low.',
+            'Verify actual received quantities before stock is added.',
         ],
         'primary_label' => 'item_name',
         'fields' => [
@@ -143,6 +147,7 @@ $DEPARTMENT_CONFIG = [
         'fields' => [
             ['name' => 'order_code', 'label' => 'Order Code (optional)', 'type' => 'text', 'required' => false],
             ['name' => 'customer_name', 'label' => 'Buyer Name', 'type' => 'text', 'required' => true],
+            ['name' => 'customer_tin', 'label' => 'Customer TIN', 'type' => 'text', 'required' => false],
             ['name' => 'beverage_name', 'label' => 'Coffee Flavor', 'type' => 'recipe_select', 'required' => true],
             ['name' => 'quantity', 'label' => 'Quantity', 'type' => 'number', 'step' => '1', 'required' => true],
             ['name' => 'unit_price', 'label' => 'Unit Price', 'type' => 'number', 'step' => '0.01', 'required' => true],
@@ -151,6 +156,7 @@ $DEPARTMENT_CONFIG = [
         'list_columns' => [
             'Order Code' => 'order_code',
             'Buyer' => 'customer_name',
+            'TIN' => 'customer_tin',
             'Flavor' => 'beverage_name',
             'Qty' => 'quantity',
             'Total' => 'total_amount',
@@ -200,11 +206,13 @@ $DEPARTMENT_CONFIG = [
         'primary_label' => 'customer_name',
         'fields' => [
             ['name' => 'customer_name', 'label' => 'Customer Name', 'type' => 'text', 'required' => true],
+            ['name' => 'customer_tin', 'label' => 'Customer TIN', 'type' => 'text', 'required' => false],
             ['name' => 'contact_no', 'label' => 'Contact Number', 'type' => 'text', 'required' => false],
             ['name' => 'preferences', 'label' => 'Preferences', 'type' => 'textarea', 'required' => false],
         ],
         'list_columns' => [
             'Customer' => 'customer_name',
+            'TIN' => 'customer_tin',
             'Contact' => 'contact_no',
             'Purchases' => 'purchase_count',
             'Total Spent' => 'total_spent',
